@@ -160,8 +160,8 @@ class TestApps(TendTestCase):
         self.assertEqual(self.tend.unknown_question(["Proceed? [y/N] "], 0, 15, 80)["answers"][0]["keys"], "y")
         # The cursor is on an empty line, like claude rc once it's connected.
         self.assertIsNone(self.tend.unknown_question(["Connected", ""], 1, 0, 80))
-        # The line doesn't end like a question.
-        self.assertIsNone(self.tend.unknown_question(["Connecting..."], 0, 13, 80))
+        # Any line counts, punctuation or not.
+        self.assertEqual(self.tend.unknown_question(["Pick a name "], 0, 12, 80)["text"], "Pick a name")
         # Text follows the cursor's line.
         self.assertIsNone(self.tend.unknown_question(["Name: ", "more"], 0, 6, 80))
 
@@ -466,6 +466,42 @@ class TestEndToEnd(unittest.TestCase):
         self.assertEqual([a["label"] for a in question["answers"]], ["same-dir", "worktree"])
         self.assertIn("Typed '2'", self.tend("answer", "q", "--text", "2").stdout)
         self.eventually(lambda: self.rows()["q"]["app"]["question"] is None)
+
+    def fake_claude(self, script):
+        fake = self.dir / "bin" / "claude"
+        fake.parent.mkdir(exist_ok=True)
+        fake.write_text("#!/bin/sh\n" + script)
+        fake.chmod(0o755)
+        return str(fake)
+
+    def test_remote_control_starts_at_its_capacity_line(self):
+        fake = self.fake_claude(
+            "printf 'Pick a mode '; read a\n"
+            "printf '\\342\\234\\224 Ready \\302\\267 x \\302\\267 main\\n    Capacity: 0/32\\n\\n'\n"
+            "printf 'after start: '; read b; sleep 600\n"
+        )
+        self.tend("add", "q", "--dir", str(self.dir), "--start", "--", fake, "rc")
+        r = self.tend("wait", "q", "--timeout", "15", check=False)
+        self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
+        self.assertIn("waiting: Pick a mode", r.stdout)
+        self.tend("answer", "q", "--text", "1")
+        r = self.tend("wait", "q", "--timeout", "15", check=False)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("Claude has started", r.stdout)
+        # Once started, tend stops guessing at prompts.
+        app = self.rows()["q"]["app"]
+        self.assertTrue(app["started"])
+        self.assertIsNone(app["question"])
+
+    def test_a_spinner_isnt_a_prompt(self):
+        fake = self.fake_claude(
+            "i=0; while [ $i -lt 30 ]; do printf '\\rStarting %d' $i; i=$((i+1)); sleep 0.1; done\n"
+            "printf '\\nYour name '; read a; sleep 600\n"
+        )
+        self.tend("add", "q", "--dir", str(self.dir), "--start", "--", fake, "rc")
+        r = self.tend("wait", "q", "--timeout", "20", check=False)
+        self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
+        self.assertIn("waiting: Your name", r.stdout)
 
     def test_errors_are_one_line(self):
         r = self.tend("start", "nosuch", check=False)

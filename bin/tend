@@ -714,6 +714,9 @@ def exe_path(pid):
 #                wins; a mode without `args` matches anything. A mode can set
 #                `resume`, a command template filled in from the metadata,
 #                plus {command}: the running command without strip_flags.
+#                A mode can also set `ready`, a regular expression for a line
+#                the app shows once it has started, for an app that doesn't
+#                report a status.
 #   strip_flags  Optional. Flags to drop from the saved command, mapped to
 #                how many values follow them, so a fresh start stays fresh.
 #   launch       Optional. The command `tend new` runs to start a new
@@ -731,10 +734,11 @@ def exe_path(pid):
 #                folder. The only check so far is "claude-trust".
 #   questions    Optional. Prompts the app can stop and wait on. tend looks
 #                at the last line of the pane, and the menu bar app offers
-#                the answers as buttons. Until the app reports a status, tend
-#                also reports any other prompt the cursor waits at, as
-#                question "prompt", with the lines above it and answers
-#                guessed from "[y/N]" or numbered choices. Each has:
+#                the answers as buttons. Until the app has started (it
+#                reports a status, or its mode's `ready` matches), tend also
+#                reports any other input the cursor waits at, as question
+#                "prompt", with the lines above it and answers guessed from
+#                "[y/N]" or numbered choices. Each has:
 #     id           Short ID.
 #     match        A regular expression for the last non-empty line. Named
 #                  groups fill in {name} in `text`.
@@ -773,6 +777,10 @@ BUILTIN_APPS = [
                 # start new sessions. --session-id and --continue reconnect
                 # in single-session mode, which turns that off.
                 "resume": "{command}",
+                # The rc process writes no session file until a
+                # conversation starts, so its screen says when it's up:
+                # "Ready" or "Connected", then "Capacity: 0/32".
+                "ready": r"^\s*Capacity: \d+/\d+",
             },
             {"id": "interactive", "resume": "{command} --resume {sessionId}"},
         ],
@@ -884,6 +892,9 @@ def read_metadata(app):
 
 def pick_mode(app, args):
     """The app's first mode that matches argv[1], or {}."""
+    # For `INTERPRETER SCRIPT ARGS`, the script stands in for argv[0].
+    if script_path(args):
+        args = args[1:]
     return next(
         (
             mode
@@ -973,7 +984,7 @@ def find_app(name, panes, procs, children, app_list, metadata):
                 if matches(app, proc) and not (parent and matches(app, parent)):
                     found = describe(app, proc, set(pids), metadata.get(app["id"], []))
                     found["pane"] = f"={name}:{pane['window']}.{pane['pane']}"
-                    found["question"] = pending_question(app, found["pane"], starting=not found["status"])
+                    found["started"], found["question"] = read_screen(app, found, found["pane"])
                     return found
     return None
 
@@ -1014,7 +1025,6 @@ def match_question(questions, line):
 
 
 # A line that ends like a prompt: "Trust X? [y/N]", "Choose [1/2]:".
-PROMPT_END = re.compile(r"[?:\])]\s*$")
 YES_NO = re.compile(r"[\[(]\s*y(?:es)?\s*/\s*n(?:o)?\s*[\])]", re.I)
 CHOICE_RANGE = re.compile(r"[\[(]\s*(\d+)\s*[-/]\s*(?:\d+\s*/\s*)*(\d+)\s*[\])]")
 CHOICE_LINE = re.compile(r"^\s*(?:[❯>]\s*)?[\[(]?(\d{1,2})[\]).]\s+(.+?)\s*$")
@@ -1030,8 +1040,9 @@ def unknown_question(rows, cursor_y, cursor_x, width):
     """A prompt no profile question names, or None.
 
     rows are the pane's visible lines, unjoined, so cursor_y indexes them. It
-    counts as a prompt only if the cursor sits at the end of the last line
-    that has text, and that line ends like a question.
+    counts as a prompt if the cursor sits at the end of the last line that
+    has text. The caller checks that the cursor shows and the screen holds
+    still, so a spinner or progress line doesn't count.
     """
     if not 0 <= cursor_y < len(rows) or cursor_x == 0:
         return None
@@ -1043,8 +1054,6 @@ def unknown_question(rows, cursor_y, cursor_x, width):
     while start > 0 and len(rows[start - 1]) >= width:
         start -= 1
     prompt = "".join(rows[start : cursor_y + 1]).strip()
-    if not PROMPT_END.search(prompt):
-        return None
     context = [r.rstrip() for r in rows[max(0, start - 12) : start]]
     while context and not context[0].strip():
         context.pop(0)
@@ -1068,32 +1077,48 @@ def unknown_question(rows, cursor_y, cursor_x, width):
     return {"id": "prompt", "text": prompt, "context": context, "answers": answers, "free_text": True}
 
 
-def pending_question(app, target, starting=False):
-    """Return the question the app is waiting on in a pane, or None.
-
-    The profile's questions come first. While the app is starting (it hasn't
-    reported a status yet), any other prompt it stops on counts too, so a new
-    question from an app update doesn't leave the session stuck unseen.
-    """
-    questions = app.get("questions") or []
-    if questions:
-        # -J joins lines that wrapped, like a trust prompt with a long path.
-        r = tmux("capture-pane", "-p", "-J", "-t", target, check=False)
-        lines = [line for line in r.stdout.splitlines() if line.strip()] if r.returncode == 0 else []
-        found = match_question(questions, lines[-1]) if lines else None
-        if found:
-            return found
-    if not starting:
-        return None
-    r = tmux("display-message", "-p", "-t", target, "#{cursor_x} #{cursor_y} #{pane_width}", check=False)
+def screen_cursor(target):
+    """(rows, cursor_x, cursor_y, width) for a pane whose cursor shows, or None."""
+    r = tmux("display-message", "-p", "-t", target, "#{cursor_x} #{cursor_y} #{pane_width} #{cursor_flag}", check=False)
     try:
-        cursor_x, cursor_y, width = (int(v) for v in r.stdout.split())
+        cursor_x, cursor_y, width, shown = (int(v) for v in r.stdout.split())
     except ValueError:
         return None
-    if cursor_x == 0:
+    if not shown or cursor_x == 0:
         return None
     r = tmux("capture-pane", "-p", "-t", target, check=False)
-    return unknown_question(r.stdout.split("\n"), cursor_y, cursor_x, width) if r.returncode == 0 else None
+    return (r.stdout.split("\n"), cursor_x, cursor_y, width) if r.returncode == 0 else None
+
+
+def read_screen(app, info, target):
+    """Whether the app has started, and the question it's waiting on, if any.
+
+    An app has started once it reports a status, or once a line of its pane
+    matches its mode's `ready` pattern, like Remote Control's "Capacity:"
+    line. An app with neither has started as soon as it runs.
+
+    The profile's questions come first. Until the app has started, tend also
+    reports any input the cursor waits at, so a prompt that's new in an app
+    update doesn't leave the session stuck where nobody sees it.
+    """
+    status_field = (app.get("metadata") or {}).get("status_field")
+    ready = pick_mode(app, info["args"]).get("ready")
+    # -J joins lines that wrapped, like a trust prompt with a long path.
+    r = tmux("capture-pane", "-p", "-J", "-t", target, check=False)
+    lines = [line for line in r.stdout.splitlines() if line.strip()] if r.returncode == 0 else []
+    started = bool(info["status"]) or (not status_field and not ready)
+    if ready and not started:
+        started = any(re.search(ready, line) for line in lines)
+    question = match_question(app.get("questions") or [], lines[-1]) if lines else None
+    if question or started:
+        return started, question
+    first = screen_cursor(target)
+    found = first and unknown_question(first[0], first[2], first[1], first[3])
+    if not found:
+        return started, None
+    # Look again, so a line that's still changing doesn't count.
+    time.sleep(0.3)
+    return started, (found if screen_cursor(target) == first else None)
 
 
 def detected_command(info):
@@ -1374,6 +1399,7 @@ def wait(cfg, name, timeout, command=None):
     session = find(cfg, name)
     expect = expected_app(cfg, command or (session and session.get("command")))
     seen_running = False
+    last_prompt = None
     while True:
         row = find_row(cfg, name)
         info = row["app"]
@@ -1390,14 +1416,16 @@ def wait(cfg, name, timeout, command=None):
             how = "stopped" if row["state"] == "stopped" else "exited"
             tail = pane_tail(name) if row["state"] != "stopped" else ""
             return 1, f"'{name}' isn't running: its command {how}." + (f"\n{tail}" if tail else "")
-        if info and info.get("question"):
-            return 2, waiting_message(name, info["question"])
-        app = info and app_by_id(cfg, info["id"])
-        # An app that reports a status is ready once it does; any other
-        # running command is ready now.
-        reports_status = bool(app and app.get("metadata", {}).get("status_field"))
-        if not reports_status or info["status"]:
-            what = f"{info['name']} is {info['status']}" if info and info["status"] else "it's running"
+        question = info and info.get("question")
+        # A guessed prompt counts once it's the same two checks in a row.
+        if question and (question["id"] != "prompt" or question == last_prompt):
+            return 2, waiting_message(name, question)
+        last_prompt = question
+        if not question and (not info or info["started"]):
+            if info and info["status"]:
+                what = f"{info['name']} is {info['status']}"
+            else:
+                what = f"{info['name']} has started" if info else "it's running"
             return 0, f"'{name}' is ready: {what}."
         if time.monotonic() >= deadline:
             return 3, f"'{name}' is still starting after {timeout} seconds. Check it with `tend open {name}`."

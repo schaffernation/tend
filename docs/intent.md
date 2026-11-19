@@ -180,21 +180,26 @@ deliberate, and lives in `sync()`: `status()` itself only reads, so `wait`,
 - **Report prompts no profile names, but only while an app starts.** Claude
   Code adds prompts without notice, like the spawn-mode choice
   (`Choose [1/2]`), and a session stuck on one looks like it's just slow.
-  So until an app reports a status, tend treats the cursor waiting at the end
-  of the last line, after `?`, `:`, `]`, or `)`, as a question named
-  `prompt`. It sends the lines above as context, guesses answers from
-  `[y/N]` or numbered choices, and accepts any reply with `--text`. Once an
-  app reports a status, its own UI (like Claude's input box) would look like
-  a prompt, so tend stops guessing. Profile questions still come first, and
+  So until an app has started (see `tend wait` below), tend treats a
+  visible cursor waiting at the end of the last line as a question named
+  `prompt`, whatever the line says. It sends the lines above as context,
+  guesses answers from `[y/N]` or numbered choices, and accepts any reply
+  with `--text`. To skip spinners and progress lines, the screen must hold
+  still across two captures 0.3 seconds apart, and `tend wait` must see the
+  same prompt twice. Once an app has started, its own UI (like Claude's
+  input box) would look like a prompt, so tend stops guessing. Profile questions still come first, and
   tend joins wrapped lines (`capture-pane -J`), since a detached pane is 80
   columns and a long folder path wraps the trust prompt.
 - **`tend wait` decides when a new session is ready.** The trust question
   can be answered in the menu or by the skill in chat, and the first answer
   wins, so the skill waits for the session's state instead of trusting its
-  own answer. For Claude, "ready" means the session file reports a status:
-  in a real test, that came about 35 seconds after answering trust, while
-  the pane already said "Connected". An app with no status field is ready
-  once its command runs. `wait` allows 10 seconds for the shell to start
+  own answer. "Ready" means the app has started: it reports a status, or
+  its pane shows the mode's `ready` line. Claude's session file reports a
+  status, but in a real test that came about 35 seconds after answering
+  trust, and Claude Code 2.1.322 writes no session file for `claude rc`
+  until a conversation starts. So Remote Control mode is ready at its
+  `Capacity: 0/32` line, which follows "Ready" or "Connected". An app with
+  neither a status field nor a `ready` line is ready once its command runs. `wait` allows 10 seconds for the shell to start
   the command before it believes "exited". When a session's command starts
   a known app, `wait` also waits until it finds that app: a login shell runs
   helper programs while it starts, and `wait` once took one of them for the
