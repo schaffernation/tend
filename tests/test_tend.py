@@ -140,6 +140,35 @@ class TestApps(TendTestCase):
         self.assertEqual([a["id"] for a in question["answers"]], ["yes", "no"])
         self.assertIsNone(self.tend.match_question(self.claude()["questions"], "$ "))
 
+    def test_unknown_question_reads_numbered_choices(self):
+        rows = [
+            "Spawn mode for this project:",
+            "  [1] same-dir - sessions share the current directory (default)",
+            "  [2] worktree - each session gets an isolated git worktree",
+            "",
+            "This can be changed later.",
+            "",
+            "Choose [1/2] (default: 1): ",
+            "",
+        ]
+        question = self.tend.unknown_question(rows, 6, 27, 80)
+        self.assertEqual(question["text"], "Choose [1/2] (default: 1):")
+        self.assertEqual([(a["id"], a["label"]) for a in question["answers"]], [("1", "same-dir"), ("2", "worktree")])
+        self.assertIn("This can be changed later.", question["context"])
+
+    def test_unknown_question_needs_the_cursor_at_a_prompt(self):
+        self.assertEqual(self.tend.unknown_question(["Proceed? [y/N] "], 0, 15, 80)["answers"][0]["keys"], "y")
+        # The cursor is on an empty line, like claude rc once it's connected.
+        self.assertIsNone(self.tend.unknown_question(["Connected", ""], 1, 0, 80))
+        # The line doesn't end like a question.
+        self.assertIsNone(self.tend.unknown_question(["Connecting..."], 0, 13, 80))
+        # Text follows the cursor's line.
+        self.assertIsNone(self.tend.unknown_question(["Name: ", "more"], 0, 6, 80))
+
+    def test_unknown_question_joins_a_wrapped_prompt(self):
+        question = self.tend.unknown_question(["a" * 20, "b" * 20, "cc? "], 2, 4, 20)
+        self.assertEqual(question["text"], "a" * 20 + "b" * 20 + "cc?")
+
     def test_trusted_by_claude_includes_parent_folders(self):
         projects = {"/Users/pat/code": {"hasTrustDialogAccepted": True}}
         self.assertTrue(self.tend.trusted_by_claude("/Users/pat/code/app", projects))
@@ -414,6 +443,28 @@ class TestEndToEnd(unittest.TestCase):
         r = self.tend("wait", "q", "--timeout", "15", check=False)
         self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
         self.assertIn("Answered 'Trust'", self.tend("answer", "q", "yes").stdout)
+        self.eventually(lambda: self.rows()["q"]["app"]["question"] is None)
+
+    def test_an_unknown_prompt_after_a_wrapped_trust_prompt(self):
+        folder = self.dir / ("long-folder-name-" * 4)
+        folder.mkdir()
+        fake = self.dir / "bin" / "claude"
+        fake.parent.mkdir()
+        fake.write_text(
+            "#!/bin/sh\nprintf 'Trust %s? [y/N] ' \"$PWD\"; read a\n"
+            "printf '  [1] same-dir - share the folder\\n  [2] worktree - one worktree each\\n\\nChoose [1/2]: '; read b\n"
+            "echo \"got $a $b\"; sleep 600\n"
+        )
+        fake.chmod(0o755)
+        self.tend("add", "q", "--dir", str(folder), "--start", "--", str(fake))
+        r = self.tend("wait", "q", "--timeout", "15", check=False)
+        self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
+        self.assertEqual(self.rows()["q"]["app"]["question"]["id"], "trust")
+        self.tend("answer", "q", "yes")
+        self.eventually(lambda: (self.rows()["q"]["app"]["question"] or {}).get("id") == "prompt")
+        question = self.rows()["q"]["app"]["question"]
+        self.assertEqual([a["label"] for a in question["answers"]], ["same-dir", "worktree"])
+        self.assertIn("Typed '2'", self.tend("answer", "q", "--text", "2").stdout)
         self.eventually(lambda: self.rows()["q"]["app"]["question"] is None)
 
     def test_errors_are_one_line(self):

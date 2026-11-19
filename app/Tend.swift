@@ -22,6 +22,10 @@ struct AppInfo: Decodable, Hashable {
         let id: String
         let text: String
         let answers: [Answer]
+        /// Lines the app printed above a prompt tend doesn't know.
+        let context: [String]?
+        /// Whether you can type a reply instead of choosing an answer.
+        let free_text: Bool?
     }
     let id: String
     let name: String
@@ -1081,6 +1085,7 @@ struct SessionRow: View {
     @AppStorage("alwaysShowRowButtons") private var alwaysShowButtons = false
     @State private var hovering = false
     @State private var confirming: Confirm?
+    @State private var reply = ""
     let session: Session
 
     enum Confirm { case restart, fresh }
@@ -1263,7 +1268,25 @@ struct SessionRow: View {
                 Image(systemName: "questionmark.bubble").foregroundStyle(.orange)
             }
             .font(.callout)
+            if let context = q.context, !context.isEmpty {
+                Text(context.joined(separator: "\n"))
+                    .font(.system(.caption2, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(12)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .textSelection(.enabled)
+            }
             HStack(spacing: 6) {
+                if q.free_text == true {
+                    TextField("Reply", text: $reply)
+                        .textFieldStyle(.roundedBorder)
+                        .controlSize(.small)
+                        .onSubmit(sendReply)
+                        .help("Type a reply to \(session.name). Press Return to send it. An empty reply takes the default.")
+                    Button("Send", action: sendReply)
+                        .controlSize(.small)
+                        .help("Type your reply in \(session.name) and press Return.")
+                }
                 Spacer()
                 ForEach(q.answers, id: \.id) { a in
                     Button(a.label) { model.act(["answer", session.name, a.id]) }
@@ -1275,6 +1298,11 @@ struct SessionRow: View {
         .padding(8)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Color.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: 6))
+    }
+
+    func sendReply() {
+        model.act(["answer", session.name, "--text", reply])
+        reply = ""
     }
 
     @ViewBuilder var menu: some View {

@@ -177,6 +177,17 @@ deliberate, and lives in `sync()`: `status()` itself only reads, so `wait`,
   Claude's, and running Claude processes rewrite it often. `tend answer`
   checks that the question is still on screen before it types, so it never
   types `y` into a shell.
+- **Report prompts no profile names, but only while an app starts.** Claude
+  Code adds prompts without notice, like the spawn-mode choice
+  (`Choose [1/2]`), and a session stuck on one looks like it's just slow.
+  So until an app reports a status, tend treats the cursor waiting at the end
+  of the last line, after `?`, `:`, `]`, or `)`, as a question named
+  `prompt`. It sends the lines above as context, guesses answers from
+  `[y/N]` or numbered choices, and accepts any reply with `--text`. Once an
+  app reports a status, its own UI (like Claude's input box) would look like
+  a prompt, so tend stops guessing. Profile questions still come first, and
+  tend joins wrapped lines (`capture-pane -J`), since a detached pane is 80
+  columns and a long folder path wraps the trust prompt.
 - **`tend wait` decides when a new session is ready.** The trust question
   can be answered in the menu or by the skill in chat, and the first answer
   wins, so the skill waits for the session's state instead of trusting its

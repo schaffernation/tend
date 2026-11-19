@@ -84,6 +84,14 @@ Show this, then ask what they'd like to do:
      session `isn't waiting on a question`, the user already answered in
      the menu. That's fine; don't treat it as an error. Either way, run
      `tend wait NAME` again.
+
+     tend also reports prompts it doesn't know, like Claude's spawn-mode
+     choice. Their lines start with `|` in `tend wait`'s output, and tend
+     guesses answers from `[y/N]` or numbered choices. Show the user those
+     lines and ask with AskUserQuestion, then run `tend answer NAME ID` for
+     a listed answer, or `tend answer NAME --text TEXT` to type a reply
+     (`--text ""` presses Enter, which takes the default). If the prompt
+     doesn't look like a question, offer `tend open NAME` instead.
    - **1, exited.** The command stopped, for example because the user
      didn't trust the folder. Say so, and offer `tend open NAME` to see why.
    - **3, timed out.** Say it's still starting, and offer `tend open NAME`.
@@ -102,8 +110,9 @@ Show this, then ask what they'd like to do:
   starts its plain command every time (`fresh`). Use `tend ls --json` when
   you need fields (`autostart`, `restore_conversation`).
 - When `tend ls` says a session is waiting on a question (like Claude's
-  trust prompt), ask the user, then run `tend answer NAME ANSWER`, and
-  `tend wait NAME` to confirm it carried on.
+  trust prompt), ask the user, then run `tend answer NAME ANSWER` (or
+  `--text TEXT` for a prompt tend doesn't know), and `tend wait NAME` to
+  confirm it carried on.
 - `tend open NAME` opens a session in a terminal window. `tend start NAME`
   starts a tracked session that's stopped.
 - `tend snapshot [NAME]` tracks running tmux sessions, so tend restores them.

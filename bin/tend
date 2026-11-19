@@ -34,6 +34,8 @@ Usage:
   tend recipes rm ID               Remove a setup you saved.
   tend answer NAME ANSWER          Answer the question a session is waiting
                                    on, like Claude's trust prompt (yes or no).
+  tend answer NAME --text TEXT     Type TEXT and press Enter instead, for a
+                                   prompt tend doesn't know.
   tend wait NAME [--timeout S]     Wait until a session is ready (for Claude,
                                    connected), is waiting on a question, or
                                    has exited. Exit status: 0 ready, 1 exited,
@@ -729,7 +731,10 @@ def exe_path(pid):
 #                folder. The only check so far is "claude-trust".
 #   questions    Optional. Prompts the app can stop and wait on. tend looks
 #                at the last line of the pane, and the menu bar app offers
-#                the answers as buttons. Each has:
+#                the answers as buttons. Until the app reports a status, tend
+#                also reports any other prompt the cursor waits at, as
+#                question "prompt", with the lines above it and answers
+#                guessed from "[y/N]" or numbered choices. Each has:
 #     id           Short ID.
 #     match        A regular expression for the last non-empty line. Named
 #                  groups fill in {name} in `text`.
@@ -968,7 +973,7 @@ def find_app(name, panes, procs, children, app_list, metadata):
                 if matches(app, proc) and not (parent and matches(app, parent)):
                     found = describe(app, proc, set(pids), metadata.get(app["id"], []))
                     found["pane"] = f"={name}:{pane['window']}.{pane['pane']}"
-                    found["question"] = pending_question(app, found["pane"])
+                    found["question"] = pending_question(app, found["pane"], starting=not found["status"])
                     return found
     return None
 
@@ -1008,14 +1013,87 @@ def match_question(questions, line):
     return None
 
 
-def pending_question(app, target):
-    """Return the question the app is waiting on in a pane, or None."""
-    questions = app.get("questions")
-    if not questions:
+# A line that ends like a prompt: "Trust X? [y/N]", "Choose [1/2]:".
+PROMPT_END = re.compile(r"[?:\])]\s*$")
+YES_NO = re.compile(r"[\[(]\s*y(?:es)?\s*/\s*n(?:o)?\s*[\])]", re.I)
+CHOICE_RANGE = re.compile(r"[\[(]\s*(\d+)\s*[-/]\s*(?:\d+\s*/\s*)*(\d+)\s*[\])]")
+CHOICE_LINE = re.compile(r"^\s*(?:[❯>]\s*)?[\[(]?(\d{1,2})[\]).]\s+(.+?)\s*$")
+
+
+def choice_label(text):
+    """A short button label from a numbered choice, like "same-dir"."""
+    label = re.split(r"\s+[-–—:]\s+|\s+\(", text, maxsplit=1)[0].strip()
+    return label if len(label) <= 30 else label[:29] + "…"
+
+
+def unknown_question(rows, cursor_y, cursor_x, width):
+    """A prompt no profile question names, or None.
+
+    rows are the pane's visible lines, unjoined, so cursor_y indexes them. It
+    counts as a prompt only if the cursor sits at the end of the last line
+    that has text, and that line ends like a question.
+    """
+    if not 0 <= cursor_y < len(rows) or cursor_x == 0:
+        return None
+    line = rows[cursor_y].rstrip()
+    if not line or any(r.strip() for r in rows[cursor_y + 1 :]) or cursor_x < len(line):
+        return None
+    # Join the rows a long prompt wrapped onto.
+    start = cursor_y
+    while start > 0 and len(rows[start - 1]) >= width:
+        start -= 1
+    prompt = "".join(rows[start : cursor_y + 1]).strip()
+    if not PROMPT_END.search(prompt):
+        return None
+    context = [r.rstrip() for r in rows[max(0, start - 12) : start]]
+    while context and not context[0].strip():
+        context.pop(0)
+    while context and not context[-1].strip():
+        context.pop()
+    answers = []
+    if YES_NO.search(prompt):
+        answers = [{"id": "yes", "label": "Yes", "keys": "y"}, {"id": "no", "label": "No", "keys": "n"}]
+    else:
+        choices = {}
+        for r in context:
+            m = CHOICE_LINE.match(r)
+            if m:
+                choices[m.group(1)] = choice_label(m.group(2))
+        bounds = CHOICE_RANGE.search(prompt)
+        if bounds:
+            low, high = int(bounds.group(1)), int(bounds.group(2))
+            if 0 <= low < high <= 20:
+                choices = {str(n): choices.get(str(n), str(n)) for n in range(low, high + 1)}
+        answers = [{"id": n, "label": label, "keys": n} for n, label in choices.items()]
+    return {"id": "prompt", "text": prompt, "context": context, "answers": answers, "free_text": True}
+
+
+def pending_question(app, target, starting=False):
+    """Return the question the app is waiting on in a pane, or None.
+
+    The profile's questions come first. While the app is starting (it hasn't
+    reported a status yet), any other prompt it stops on counts too, so a new
+    question from an app update doesn't leave the session stuck unseen.
+    """
+    questions = app.get("questions") or []
+    if questions:
+        # -J joins lines that wrapped, like a trust prompt with a long path.
+        r = tmux("capture-pane", "-p", "-J", "-t", target, check=False)
+        lines = [line for line in r.stdout.splitlines() if line.strip()] if r.returncode == 0 else []
+        found = match_question(questions, lines[-1]) if lines else None
+        if found:
+            return found
+    if not starting:
+        return None
+    r = tmux("display-message", "-p", "-t", target, "#{cursor_x} #{cursor_y} #{pane_width}", check=False)
+    try:
+        cursor_x, cursor_y, width = (int(v) for v in r.stdout.split())
+    except ValueError:
+        return None
+    if cursor_x == 0:
         return None
     r = tmux("capture-pane", "-p", "-t", target, check=False)
-    lines = [line for line in r.stdout.splitlines() if line.strip()] if r.returncode == 0 else []
-    return match_question(questions, lines[-1]) if lines else None
+    return unknown_question(r.stdout.split("\n"), cursor_y, cursor_x, width) if r.returncode == 0 else None
 
 
 def detected_command(info):
@@ -1313,9 +1391,7 @@ def wait(cfg, name, timeout, command=None):
             tail = pane_tail(name) if row["state"] != "stopped" else ""
             return 1, f"'{name}' isn't running: its command {how}." + (f"\n{tail}" if tail else "")
         if info and info.get("question"):
-            question = info["question"]
-            ids = "|".join(a["id"] for a in question["answers"])
-            return 2, f"'{name}' is waiting: {question['text']}\nAnswer with `tend answer {name} {ids}`."
+            return 2, waiting_message(name, info["question"])
         app = info and app_by_id(cfg, info["id"])
         # An app that reports a status is ready once it does; any other
         # running command is ready now.
@@ -1328,23 +1404,50 @@ def wait(cfg, name, timeout, command=None):
         time.sleep(2)
 
 
-def answer(cfg, name, answer_id):
-    """Type the answer to the question a session is waiting on."""
+def answer(cfg, name, answer_id=None, text=None):
+    """Type the answer to the question a session is waiting on.
+
+    Give an answer ID from the question, or text to type as is. Empty text
+    just presses Enter, which takes a prompt's default.
+    """
     row = find_row(cfg, name)
     question = row["app"] and row["app"].get("question")
     if not question:
         raise TendError(f"'{name}' isn't waiting on a question.")
+    pane = row["app"]["pane"]
+    if text is not None:
+        if text:
+            tmux("send-keys", "-t", pane, "-l", "--", text)
+        tmux("send-keys", "-t", pane, "Enter")
+        return f"Typed '{text}' in '{name}'." if text else f"Pressed Enter in '{name}'."
     app = app_by_id(cfg, row["app"]["id"]) or {}
     spec = next((q for q in app.get("questions", []) if q["id"] == question["id"]), None)
-    if not spec:
-        raise TendError(f"'{name}' isn't waiting on a question.")
-    choice = next((a for a in spec["answers"] if a["id"] == answer_id), None)
+    # A prompt no profile names carries its own keys.
+    answers = spec["answers"] if spec else question["answers"]
+    choice = next((a for a in answers if a["id"] == answer_id), None)
     if not choice:
-        ids = " or ".join(a["id"] for a in spec["answers"])
-        raise TendError(f"answer with {ids}.")
-    tmux("send-keys", "-t", row["app"]["pane"], "-l", "--", choice["keys"])
-    tmux("send-keys", "-t", row["app"]["pane"], "Enter")
+        ids = " or ".join(a["id"] for a in answers)
+        raise TendError(f"answer with {ids}, or type a reply with --text." if ids else "type a reply with --text.")
+    tmux("send-keys", "-t", pane, "-l", "--", choice["keys"])
+    tmux("send-keys", "-t", pane, "Enter")
     return f"Answered '{choice['label']}' in '{name}'."
+
+
+def answer_hint(name, question):
+    """How to answer a question, for messages."""
+    ids = "|".join(a["id"] for a in question["answers"])
+    how = f"`tend answer {name} {ids}`" if ids else ""
+    if question.get("free_text"):
+        how += (" or " if how else "") + f"`tend answer {name} --text TEXT`"
+    return how
+
+
+def waiting_message(name, question, indent=""):
+    """Say what a session is waiting on, with what it printed before, if new."""
+    lines = [f"'{name}' is waiting: {question['text']}"]
+    lines += [indent + "| " + line for line in question.get("context", [])]
+    lines.append(f"{indent}Answer with {answer_hint(name, question)}.")
+    return "\n".join(lines)
 
 
 # ---------------------------------------------------------------- terminal
@@ -1576,8 +1679,7 @@ def print_table(rows):
     for r in rows:
         question = r["app"] and r["app"].get("question")
         if question:
-            ids = "|".join(a["id"] for a in question["answers"])
-            print(f"\n{r['name']} is waiting: {question['text']}\n  Answer with `tend answer {r['name']} {ids}`.")
+            print("\n" + waiting_message(r["name"], question, indent="  "))
 
 
 def print_account_problems(cfg):
@@ -1971,7 +2073,9 @@ def cmd_accounts(cfg, opts):
 
 
 def cmd_answer(cfg, opts):
-    print(answer(cfg, opts.name, opts.answer))
+    if (opts.answer is None) == (opts.text is None):
+        raise TendError("give an ANSWER or --text, not both.")
+    print(answer(cfg, opts.name, opts.answer, opts.text))
 
 
 def cmd_wait(cfg, opts):
@@ -2086,7 +2190,8 @@ def build_parser():
 
     sp = command("answer", cmd_answer, help="answer the question a session is waiting on")
     sp.add_argument("name")
-    sp.add_argument("answer")
+    sp.add_argument("answer", nargs="?")
+    sp.add_argument("--text", help="type TEXT and press Enter instead (empty: press Enter)")
 
     sp = command("folders", cmd_folders, help="suggest folders for a new session")
     sp.add_argument("--json", action="store_true")
