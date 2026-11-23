@@ -275,7 +275,8 @@ deliberate, and lives in `sync()`: `status()` itself only reads, so `wait`,
   through an `NSApplicationDelegateAdaptor`. The panel is
   `.nonactivatingPanel`: it takes the keyboard without making Tend the
   active app, the way a menu does, so the app you were in keeps the menu
-  bar. It uses the `.menu` material, joins every Space and full-screen apps,
+  bar. Its background is Liquid Glass on macOS 26 and later and the `.menu`
+  material before (see "Two designs, one file"). It joins every Space and full-screen apps,
   hangs under the item, and resizes with its content's
   `preferredContentSize`. It closes when it loses the key window (as when
   Settings opens), on a click in another app (a global event monitor), on
@@ -347,6 +348,47 @@ deliberate, and lives in `sync()`: `status()` itself only reads, so `wait`,
   another host can't break it. A build without a real
   `SUPublicEDKey`, like a fork's, doesn't start Sparkle at all. Tend is a menu bar app, so it brings
   Sparkle's windows to the front itself.
+- **Two designs, one file.** On macOS 26 and later the app uses Liquid
+  Glass; on macOS 14 and 15 it keeps the design it had before. Every
+  difference lives in `app/Glass.swift`, as named styles (`.surface(...)`,
+  `HeaderButtons`, `PanelBackground`) that each choose with
+  `if #available(macOS 26, *), Design.glass`. Views call the styles and
+  hold no availability checks, so a reader sees both designs side by side,
+  and dropping macOS 14 and 15 later means deleting branches in one file.
+  The fallback branch is the earlier code, moved unchanged, because people
+  on macOS 14 and 15 still see it and nobody tested a redesign there. The
+  `TendLegacyDesign` default, read once in `Design.glass`, forces the
+  fallback, so you can check it on a newer Mac.
+- **Glass only on the controls layer.** Apple's guidance puts Liquid Glass
+  on controls that float over content and keeps content plain, without
+  stacking glass on glass. So the panel's background is an
+  `NSGlassEffectView`, and
+  the header's refresh and plus buttons share one glass capsule, like a
+  toolbar group. Separate `.glass` buttons in a `GlassEffectContainer`
+  merged into two joined circles, which looked worse. The new-session
+  form's Start is `.glassProminent` and Cancel `.glass`, as in a macOS 26
+  dialog. These three controls do sit on the panel's glass, the way a
+  toolbar group and a dialog's buttons do in macOS 26; nothing else inside
+  the panel is glass. The form, banners, question cards, and the peek area are content:
+  plain fills, with corners concentric with the panel (`ConcentricRectangle`
+  inside the panel's `containerShape`). Banners keep their tints, so orange
+  still means "needs you" and red an error. Rows stay borderless. The
+  panel's corner radius, 18 points, matches a popover measured on macOS 27;
+  a menu's is 12, which the fallback keeps. Glass draws its own shadow, so
+  the window's shadow is off on macOS 26 and later, where it outlined the
+  window's square corners.
+- **The app icon is a layered Icon Composer document.** `app/AppIcon.icon`
+  keeps the old design, with the gradient as the document's fill and the
+  chevron and the sprout as separate glass layers, so macOS 26 and later
+  can draw it as glass in light, dark, clear, and tinted. `make-icon.swift`
+  writes the document from the old geometry, as filled outlines: an open
+  stroked path rendered with a seam where the glass renderer closed it.
+  `make-icon-assets.sh` compiles it with `actool` into `Assets.car`, which
+  also holds actool's flat renderings for macOS 14 and 15, and draws
+  `AppIcon.icns` and `AppIcon.png` from Icon Composer's `ictool` rendering,
+  because actool's own `.icns` stops at 128 points and its flat renderings
+  are soft. The outputs are committed, so `build.sh` still needs only the
+  command-line tools; regenerating them needs Xcode 26 or later.
 - **Action errors and refresh errors are separate.** An action's error stays
   until you close it or take another action. Before, the refresh that follows
   every action cleared it right away, so most action errors never showed.
