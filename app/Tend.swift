@@ -379,6 +379,15 @@ final class Model: ObservableObject {
             let out = Pipe(), err = Pipe()
             p.standardOutput = out
             p.standardError = err
+            // Wait for the exit with terminationHandler, not waitUntilExit:
+            // on macOS 27, waitUntilExit sometimes never returns after tend
+            // exits, and then the panel stops refreshing. The stream keeps
+            // the status if tend exits before anything waits for it.
+            let (exits, exited) = AsyncStream.makeStream(of: Int32.self)
+            p.terminationHandler = { process in
+                exited.yield(process.terminationStatus)
+                exited.finish()
+            }
             do { try p.run() } catch {
                 return TendResult(output: nil, error: "Couldn't run \(Model.tend): \(error.localizedDescription)")
             }
@@ -387,8 +396,9 @@ final class Model: ObservableObject {
             let errReader = Task.detached { err.fileHandleForReading.readDataToEndOfFile() }
             let data = out.fileHandleForReading.readDataToEndOfFile()
             let errData = await errReader.value
-            p.waitUntilExit()
-            guard p.terminationStatus == 0 else {
+            var status: Int32 = -1
+            for await s in exits { status = s }
+            guard status == 0 else {
                 let message = String(decoding: errData, as: UTF8.self)
                 return TendResult(output: nil, error: message.trimmingCharacters(in: .whitespacesAndNewlines))
             }
