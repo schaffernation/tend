@@ -537,6 +537,7 @@ func shortPath(_ path: String) -> String {
 @main
 struct TendApp: App {
     @StateObject private var model = Model()
+    private let updates = Updates.shared  // Starts Sparkle at launch. See Updates.swift.
 
     var body: some Scene {
         MenuBarExtra {
@@ -1420,6 +1421,7 @@ struct GeneralPane: View {
                 Toggle("Restore sessions after the Mac starts", isOn: $restoreOnLaunch)
                     .help("The first time Tend opens after the Mac starts, start every tracked session that's set to restore. If you quit Tend or it crashes, your sessions keep running, and opening Tend again doesn't start or stop anything.")
             }
+            UpdatesSection()
             Section("Panel") {
                 Toggle("Always show session buttons", isOn: $alwaysShowButtons)
                     .help("Show every row's buttons all the time, not only when the pointer is over the row. The Open or Start button always shows.")
