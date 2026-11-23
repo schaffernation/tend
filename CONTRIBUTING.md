@@ -22,6 +22,8 @@ records why Tend works the way it does, and which parts are still untested.
   release scripts use, and `app/appcast.sh` makes the update feed.
 - `app/Updates.swift` holds the app's Sparkle code: the updater and the
   **Updates** settings.
+- `app/Glass.swift` holds the app's two designs: Liquid Glass, and the
+  design for macOS 14 and 15.
 - `skills/tend` is a Claude Code skill that drives the CLI.
 
 Three rules keep the project in shape:
@@ -150,6 +152,16 @@ so it never checks for updates.
 SourceKit reports "'main' attribute cannot be used in a module that contains
 top-level code" for `Tend.swift`. It's a false alarm: `build.sh` compiles with
 `-parse-as-library`.
+
+`app/Glass.swift` holds every difference between the Liquid Glass design,
+on macOS 26 and later, and the design for macOS 14 and 15. Views in
+`Tend.swift` use its named styles and contain no `#available` checks. To
+see the macOS 14 and 15 design on a newer Mac, open the app with the
+`TendLegacyDesign` default:
+
+```
+open -n app/build/Tend.app --args -TendLegacyDesign YES
+```
 
 If you change how the panel looks, run `app/screenshot/make.sh` to update the
 screenshots in the README. It draws the real panel with example sessions, so

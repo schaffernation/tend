@@ -59,7 +59,7 @@ for arch in arm64 x86_64; do
     -F $sparkle -framework Sparkle \
     -Xlinker -rpath -Xlinker @executable_path/../Frameworks \
     -o $build/arch/Tend-$arch \
-    $here/Tend.swift $here/Updates.swift
+    $here/Tend.swift $here/Glass.swift $here/Updates.swift
 done
 lipo -create -output $app/Contents/MacOS/Tend $build/arch/Tend-arm64 $build/arch/Tend-x86_64
 
