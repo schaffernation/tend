@@ -14,6 +14,9 @@ This file lists the changes in each release of Tend. Versions follow
 - Tests (`python3 -m unittest discover tests`) and a GitHub Actions workflow
   that runs them and builds the app.
 - A license (MIT), contributing guide, and security policy.
+- A Homebrew cask, for `brew install --cask schaffernation/tend/tend`. It
+  installs tmux and links `tend` onto your `PATH`. `app/update-cask.sh`
+  points it at a new release.
 
 ### Changed
 

@@ -48,6 +48,22 @@ development server or a script that keeps a connection open.
 
 ## Install
 
+### With Homebrew
+
+```
+brew install --cask schaffernation/tend/tend
+```
+
+Homebrew installs tmux if you don't have it, puts Tend in **Applications**,
+and links `tend` onto your `PATH`, so you can skip the **Install** button in
+Settings. Then open Tend, and turn on **Open Tend at login** as in step 3
+below.
+
+Tend updates itself, so `brew upgrade` skips it unless you run
+`brew upgrade --greedy`. `brew uninstall --zap --cask tend` removes Tend's
+preferences and caches, but keeps your session list in `~/.config/tend`.
+Uninstalling doesn't stop your tmux sessions.
+
 ### From a release
 
 1. Download `Tend-VERSION.dmg` from
