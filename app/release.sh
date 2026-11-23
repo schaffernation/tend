@@ -58,3 +58,5 @@ print
 print "Built $dmg"
 print "To publish it:"
 print "  gh release create v$version $dmg --title 'Tend $version' --generate-notes"
+
+$here/appcast.sh $dmg

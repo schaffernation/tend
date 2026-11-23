@@ -37,5 +37,17 @@
   <true/>
   <key>NSAppleEventsUsageDescription</key>
   <string>Tend opens tmux sessions in your terminal app.</string>
+  <!-- Sparkle updates. SUFeedURL is the one place the appcast's address
+       lives: appcast.sh reads it from here too. Change it if the feed
+       moves. -->
+  <key>SUFeedURL</key>
+  <string>https://schaffernation.com/tend/appcast.xml</string>
+  <!-- The public half of the EdDSA key that signs updates. Until this holds
+       a real key, Tend doesn't check for updates. To make the key, once, run
+       app/build/cache/Sparkle-VERSION/bin/generate_keys, which stores the
+       private key in your keychain and prints the public key to put here.
+       See "Build a release" in README.md. -->
+  <key>SUPublicEDKey</key>
+  <string>PLACEHOLDER-run-generate_keys-and-paste-the-public-key-here</string>
 </dict>
 </plist>

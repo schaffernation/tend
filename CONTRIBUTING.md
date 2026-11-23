@@ -13,7 +13,10 @@ records why Tend works the way it does, and which parts are still untested.
 - `app/Tend.swift` is the menu bar app. It runs its bundled copy of
   `tend ... --json` and shows the result. It has no behavior of its own.
 - `app/build.sh` builds the app, and `app/release.sh` builds a signed,
-  notarized disk image.
+  notarized disk image. `app/sparkle.sh` downloads the pinned Sparkle
+  release that both use, and `app/appcast.sh` makes the update feed.
+- `app/Updates.swift` holds the app's Sparkle code: the updater and the
+  **Updates** settings.
 - `skills/tend` is a Claude Code skill that drives the CLI.
 
 Three rules keep the project in shape:
@@ -117,6 +120,16 @@ menu bar app's poll saved in the meantime isn't lost.
 
 After you change `app/` or `bin/tend`, run `app/build.sh --no-install`. The
 build treats warnings as errors.
+
+The first build downloads Sparkle into `app/build/cache` and checks its
+SHA-256. To move to a new Sparkle version, change `sparkle_version` and
+`sparkle_sha256` in `app/sparkle.sh`. `build.sh` leaves out Sparkle's XPC
+services, which only sandboxed apps use, and signs Sparkle's `Autoupdate`,
+`Updater.app`, and the framework before the app, as Sparkle's documentation
+describes for builds without Xcode.
+
+A build whose `Info.plist` has no real `SUPublicEDKey` doesn't start Sparkle,
+so it never checks for updates.
 
 SourceKit reports "'main' attribute cannot be used in a module that contains
 top-level code" for `Tend.swift`. It's a false alarm: `build.sh` compiles with

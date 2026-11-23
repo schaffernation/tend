@@ -73,6 +73,15 @@ ln -sfn "$PWD/bin/tend" ~/.local/bin/tend
 
 `build.sh` installs the app in `/Applications` and opens it. To build without
 installing, run `app/build.sh --no-install`. The app is then in `app/build`.
+The first build downloads [Sparkle](https://sparkle-project.org), the
+framework Tend uses to update itself, into `app/build/cache`.
+
+### Updates
+
+A release of Tend checks for new versions with Sparkle. To check now, or to
+turn automatic checks on or off, open **Settings**, and see **Updates** in
+**General**. A build from source can't update itself until its `Info.plist`
+has a `SUPublicEDKey` (see [Build a release](#build-a-release)).
 
 ## Get started
 
@@ -313,14 +322,49 @@ Tend keeps its files in `~/.config/tend`:
 - `state.json` holds what Tend records for itself, like conversation history
   and when it last restored. Don't edit it.
 
-Tend itself doesn't connect to the network. The programs and setup commands
-it runs for you can.
+Tend itself connects to the network only to check for updates, at the
+`SUFeedURL` in `app/Info.plist`, if you allow it. The programs and setup
+commands it runs for you can connect too.
 
 ## Build a release
 
 To build a signed, notarized disk image, run `app/release.sh`. You need a
 Developer ID Application certificate in your keychain. The script explains
 the one-time notarization setup in its header.
+
+At the end, `release.sh` runs `app/appcast.sh`, which writes
+`app/build/appcast/appcast.xml`: the Sparkle feed that tells installed copies
+of Tend about the release. Its release notes come from the version's section
+of [CHANGELOG.md](CHANGELOG.md).
+
+Before the first release, set up update signing once:
+
+1. Run `app/build.sh --no-install`, so that Sparkle's tools are in
+   `app/build/cache`.
+2. Run `app/build/cache/Sparkle-*/bin/generate_keys`. It stores a private
+   EdDSA key in your login keychain and prints the public key. Keep a copy of
+   the private key somewhere safe, like a password manager: to export it,
+   run `generate_keys -x FILE`. If you lose it, released copies of Tend can't
+   update anymore.
+3. In `app/Info.plist`, replace the `SUPublicEDKey` placeholder with the
+   public key, and commit it.
+4. Make sure you can publish files at the `SUFeedURL` in `app/Info.plist`
+   (`https://schaffernation.com/tend/appcast.xml`). To move the feed, change
+   that one value, before the first release if you can: released copies
+   keep checking the address they shipped with.
+
+For each release:
+
+1. Raise `CFBundleShortVersionString` and `CFBundleVersion` in
+   `app/Info.plist`. Sparkle compares `CFBundleVersion`.
+2. In `CHANGELOG.md`, rename **Unreleased** to the version, like `## 0.2`.
+3. Run `app/release.sh`.
+4. Publish the disk image on GitHub Releases with the `gh release create`
+   command that `release.sh` prints. The appcast's download link points at
+   `releases/download/vVERSION/Tend-VERSION.dmg`.
+5. Upload `app/build/appcast/appcast.xml` to the `SUFeedURL`.
+
+To make the appcast again without rebuilding, run `app/appcast.sh`.
 
 ## Contributing
 

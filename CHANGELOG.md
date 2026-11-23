@@ -26,6 +26,9 @@ This file lists the changes in each release of Tend. Versions follow
 - Tests (`python3 -m unittest discover tests`) and a GitHub Actions workflow
   that runs them and builds the app.
 - A license (MIT), contributing guide, and security policy.
+- The app updates itself with [Sparkle](https://sparkle-project.org). In
+  **Settings > General > Updates**, you can check for updates and turn
+  automatic checks on or off.
 
 ### Changed
 
