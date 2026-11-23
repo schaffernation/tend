@@ -12,6 +12,12 @@
   <string>Tend</string>
   <key>CFBundleExecutable</key>
   <string>Tend</string>
+  <!-- The icon: AppIcon in Assets.car, the layered icon that macOS 26 and
+       later render as Liquid Glass, with flat renderings for macOS 14 and
+       15. AppIcon.icns is the flat fallback. make-icon-assets.sh makes
+       both. -->
+  <key>CFBundleIconName</key>
+  <string>AppIcon</string>
   <key>CFBundleIconFile</key>
   <string>AppIcon</string>
   <key>CFBundlePackageType</key>
