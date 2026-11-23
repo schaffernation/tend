@@ -1,0 +1,15 @@
+{
+  "name": "Tend",
+  "short_name": "Tend",
+  "description": "A Mac menu bar app and command-line tool that keeps long-running tmux sessions alive and restores them after a restart, with built-in support for Claude Code.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "browser",
+  "lang": "en",
+  "theme_color": "#1a4d38",
+  "background_color": "#0c1311",
+  "icons": [
+    { "src": "images/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "images/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" }
+  ]
+}

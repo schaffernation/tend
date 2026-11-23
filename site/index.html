@@ -1,0 +1,173 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Tend: your terminal sessions, back after a restart</title>
+  <meta name="description" content="Tend is a Mac menu bar app and command-line tool that keeps long-running tmux sessions alive and restores them after a restart, with built-in support for Claude Code.">
+  <link rel="canonical" href="https://tend.schaffernation.com/">
+  <meta name="color-scheme" content="light dark">
+  <meta name="theme-color" media="(prefers-color-scheme: light)" content="#f4f7f5">
+  <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#0c1311">
+
+  <link rel="icon" href="favicon.ico" sizes="any">
+  <link rel="icon" href="images/favicon-32.png" type="image/png" sizes="32x32">
+  <link rel="apple-touch-icon" href="apple-touch-icon.png">
+  <link rel="manifest" href="manifest.webmanifest">
+
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="Tend">
+  <meta property="og:title" content="Tend">
+  <meta property="og:description" content="A Mac menu bar app and command-line tool that keeps long-running terminal sessions alive and brings them back after a restart, with built-in support for Claude Code.">
+  <meta property="og:url" content="https://tend.schaffernation.com/">
+  <meta property="og:image" content="https://tend.schaffernation.com/images/og.png">
+  <meta property="og:image:type" content="image/png">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:image:alt" content="The Tend app icon, a terminal prompt with a sprout for a cursor, beside the words: Tend. Your terminal sessions, back after a restart.">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Tend">
+  <meta name="twitter:description" content="A Mac menu bar app and command-line tool that keeps long-running terminal sessions alive and brings them back after a restart.">
+  <meta name="twitter:image" content="https://tend.schaffernation.com/images/og.png">
+  <meta name="twitter:image:alt" content="The Tend app icon, a terminal prompt with a sprout for a cursor, beside the words: Tend. Your terminal sessions, back after a restart.">
+
+  <link rel="stylesheet" href="style.css">
+  <script src="main.js" defer></script>
+</head>
+<body>
+  <a class="skip" href="#main">Skip to content</a>
+
+  <header class="site-header">
+    <div class="wrap header-row">
+      <a class="brand" href="./">
+        <img src="images/favicon-32.png" width="22" height="22" alt="">
+        <span>Tend</span>
+      </a>
+      <nav aria-label="Site">
+        <ul class="nav-links">
+          <li><a href="https://github.com/schaffernation/tend#readme">Docs</a></li>
+          <li><a href="https://github.com/schaffernation/tend">GitHub</a></li>
+        </ul>
+      </nav>
+    </div>
+  </header>
+
+  <main id="main">
+    <section class="hero" aria-labelledby="title">
+      <div class="wrap hero-grid">
+        <div class="hero-copy">
+          <img class="hero-icon" src="images/icon-512.png" width="120" height="120" alt="">
+          <p class="eyebrow"><span class="chevron" aria-hidden="true">&gt;</span> A menu bar app and CLI for macOS<span class="cursor" aria-hidden="true"></span></p>
+          <h1 id="title">Tend</h1>
+          <p class="pitch">Tend keeps your long-running terminal sessions running, and brings them back after your Mac restarts.</p>
+          <p class="pitch-2">Built with Claude Code in mind: a restored Remote Control session reconnects to its last conversation.</p>
+
+          <div class="get" id="get" data-release="unknown">
+            <h2 class="visually-hidden">Get Tend</h2>
+            <p class="status-badge" data-show="unreleased">Not released yet</p>
+            <div class="download-row">
+              <a class="button" id="download" href="https://github.com/schaffernation/tend/releases">
+                <svg class="button-icon" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M8 2v8m0 0-3.5-3.5M8 10l3.5-3.5M3 13.5h10" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                <span id="download-label">Download from GitHub</span>
+              </a>
+            </div>
+            <p class="meta" id="download-meta">
+              <span data-show="unknown">From GitHub Releases · macOS 14 or later</span>
+              <span data-show="released"><span id="release-version"></span> · <span id="release-macos">macOS 14 or later</span></span>
+              <span data-show="unreleased">The first release is on its way. Until then, you can <a href="https://github.com/schaffernation/tend#from-source">build Tend from source</a>.</span>
+            </p>
+
+            <div class="brew">
+              <p class="brew-label" id="brew-label">Or install with Homebrew</p>
+              <div class="command" role="group" aria-labelledby="brew-label">
+                <div class="command-scroll" tabindex="0" aria-label="Homebrew command">
+                  <code><span class="prompt" aria-hidden="true">$ </span><span id="brew-command">brew install --cask schaffernation/apps/tend</span></code>
+                </div>
+                <button class="copy" type="button" id="copy" hidden>
+                  <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><rect x="5.5" y="5.5" width="8" height="8" rx="1.6" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M10.5 3.5v-.4A1.6 1.6 0 0 0 8.9 1.5H4.1a1.6 1.6 0 0 0-1.6 1.6v4.8a1.6 1.6 0 0 0 1.6 1.6h.4" fill="none" stroke="currentColor" stroke-width="1.4"/></svg>
+                  <span class="copy-text">Copy</span><span class="visually-hidden"> command</span>
+                </button>
+              </div>
+              <p class="brew-note" data-show="unreleased">This command works after the first release.</p>
+              <p class="visually-hidden" id="copy-status" aria-live="polite"></p>
+            </div>
+          </div>
+        </div>
+
+        <figure class="hero-shot">
+          <picture>
+            <source media="(prefers-color-scheme: dark)" srcset="images/screenshot-dark.png" width="402" height="502">
+            <img src="images/screenshot-light.png" width="402" height="502" loading="eager" decoding="async" alt="The Tend panel. It lists six sessions. Three run Claude: recipe-box is busy, api is idle, and notes is waiting for an answer to Claude's trust question, with Trust and Don't trust buttons. A dev server runs in site, docs is stopped, and scratch is a tmux session Tend doesn't track yet.">
+          </picture>
+        </figure>
+      </div>
+    </section>
+
+    <section class="section" aria-labelledby="what">
+      <div class="wrap">
+        <h2 id="what" class="section-title">What Tend does</h2>
+        <p class="lede">Tend keeps a list of your long-running terminal sessions. It has two parts: <code>tend</code>, a command-line tool that works over ssh, and a menu bar app that shows your sessions and runs <code>tend</code> for you.</p>
+        <ul class="features">
+          <li>
+            <h3>Sessions that keep running</h3>
+            <p>Each session runs in tmux, so it keeps running after you close your terminal or disconnect from ssh.</p>
+          </li>
+          <li>
+            <h3>Back after a restart</h3>
+            <p>After your Mac restarts, Tend starts your sessions again, in the same folders, with the same commands.</p>
+          </li>
+          <li>
+            <h3>In the menu bar</h3>
+            <p>See which sessions are running and which are stopped. To start a session in a folder, drop the folder on Tend's icon. The list works from the keyboard, too.</p>
+          </li>
+          <li>
+            <h3>Any long-running program</h3>
+            <p>Run a development server, or a script that keeps a connection open. To teach Tend about a program, add it as an app, and describe how to resume it and which prompts it waits on.</p>
+          </li>
+        </ul>
+      </div>
+    </section>
+
+    <section class="section claude" aria-labelledby="claude">
+      <div class="wrap">
+        <div class="panel">
+          <h2 id="claude" class="section-title">For Claude Code users</h2>
+          <p class="lede">Suppose you run several Claude Code sessions with Remote Control, one per project, so you can check on them from your phone or from claude.ai/code. When your Mac restarts, every one of them ends. Tend brings them back.</p>
+          <ul class="checks">
+            <li><strong>See what each session is doing.</strong> The menu bar shows whether each Claude session is busy or idle, and which ones wait for you to answer a question.</li>
+            <li><strong>Answer the trust prompt.</strong> In a folder that you haven't trusted yet, Claude asks whether to trust it, and waits. Click <b>Trust</b> or <b>Don't trust</b> on the session's row, or run <code>tend answer NAME yes</code>.</li>
+            <li><strong>Come back to the same conversation.</strong> After a restart, Tend reconnects each Remote Control session to its last conversation, if Remote Control still remembers it. Tend also records the conversations each session runs, so you can bring one back with <code>tend resume NAME</code>.</li>
+          </ul>
+          <p class="disclaimer">Tend is an independent project. It isn't made by or affiliated with Anthropic.</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" aria-labelledby="requirements">
+      <div class="wrap">
+        <h2 id="requirements" class="section-title">Requirements</h2>
+        <ul class="requirements">
+          <li><strong>macOS 14 or later</strong>, on Apple silicon or Intel.</li>
+          <li><strong>tmux.</strong> If you install Tend with Homebrew, Homebrew installs tmux for you. Otherwise, run <code>brew install tmux</code>.</li>
+          <li><strong>Python 3.8 or later.</strong> If you have Homebrew or the Xcode Command Line Tools, you already have it.</li>
+        </ul>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="wrap footer-row">
+      <nav aria-label="Project">
+        <ul class="footer-links">
+          <li><a href="https://github.com/schaffernation/tend">Source on GitHub</a></li>
+          <li><a href="https://github.com/schaffernation/tend#readme">Documentation</a></li>
+          <li><a href="https://github.com/schaffernation/tend/releases">Releases</a></li>
+          <li><a href="https://github.com/schaffernation/tend/blob/main/CHANGELOG.md">Changelog</a></li>
+          <li><a href="https://github.com/schaffernation/tend/blob/main/LICENSE">MIT License</a></li>
+        </ul>
+      </nav>
+      <p class="copyright">© 2026 SchafferNation LLC</p>
+    </div>
+  </footer>
+</body>
+</html>
