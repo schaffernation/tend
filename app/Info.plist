@@ -42,12 +42,12 @@
        moves. -->
   <key>SUFeedURL</key>
   <string>https://tend.schaffernation.com/appcast.xml</string>
-  <!-- The public half of the EdDSA key that signs updates. Until this holds
-       a real key, Tend doesn't check for updates. To make the key, once, run
-       app/build/cache/Sparkle-VERSION/bin/generate_keys, which stores the
-       private key in your keychain and prints the public key to put here.
+  <!-- The public half of the EdDSA key that signs updates. The private half
+       is in the maintainer's login keychain, made by Sparkle's generate_keys.
+       Released copies trust only updates signed with that key, so never
+       change this unless you mean to cut them off from automatic updates.
        See "Build a release" in README.md. -->
   <key>SUPublicEDKey</key>
-  <string>PLACEHOLDER-run-generate_keys-and-paste-the-public-key-here</string>
+  <string>usfQFxIL4WF6eDk0lPyW7o6vb3o8Cp6nd/L5Geynyo4=</string>
 </dict>
 </plist>
