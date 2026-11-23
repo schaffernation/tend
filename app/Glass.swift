@@ -45,13 +45,23 @@ enum Design {
 
     /// The corner radius of a row's hover and selection highlight.
     static var rowCornerRadius: CGFloat { glass ? 8 : 6 }
+
+    /// Space between the bottom of the menu bar and the panel's top. Glass: a
+    /// menu bar menu's on macOS 26 and later, measured from a real one.
+    static var menuBarGap: CGFloat { glass ? 2 : 4 }
+
+    /// The size of a section header, like "Sessions", and its button. Glass:
+    /// a menu's section header, 11 points, measured from a real one. Before:
+    /// 10 points.
+    static var sectionHeaderFont: Font { glass ? .subheadline : .caption }
 }
 
 // MARK: - The panel's background
 
 /// The panel's background view, which holds the SwiftUI content. Glass: an
-/// `NSGlassEffectView` with the panel's corner radius. Before: the menu
-/// material, with corners cut by a mask image.
+/// `NSGlassEffectView` with the panel's corner radius, clipped to it. Before:
+/// the menu material, with corners cut by a mask image. Either way, the
+/// window's shadow follows the rounded shape, as a menu's does.
 @MainActor
 enum PanelBackground {
     static func make() -> NSView {
@@ -59,6 +69,14 @@ enum PanelBackground {
             let glass = NSGlassEffectView()
             glass.style = .regular
             glass.cornerRadius = Design.panelCornerRadius
+            // Clip the view to the glass's shape too. The window server
+            // draws the window's shadow and its edge from what the window
+            // draws, and the glass alone leaves it the window's square
+            // bounds, so they outlined the corners.
+            glass.wantsLayer = true
+            glass.layer?.cornerRadius = Design.panelCornerRadius
+            glass.layer?.cornerCurve = .continuous
+            glass.layer?.masksToBounds = true
             return glass
         }
         let background = NSVisualEffectView()
@@ -68,11 +86,6 @@ enum PanelBackground {
         background.maskImage = roundedMask(radius: Design.panelCornerRadius)
         return background
     }
-
-    /// Whether the panel's window draws a shadow. Glass draws its own,
-    /// following its corners; a window shadow would outline the window's
-    /// square bounds. Before: the window's shadow follows the mask.
-    static var windowShadow: Bool { !Design.glass }
 
     /// Put the panel's content inside its background, filling it.
     static func setContent(_ view: NSView, in background: NSView) {
@@ -302,6 +315,71 @@ struct HeaderButtons<Content: View>: View {
         } else {
             HStack(spacing: 8) { content }
                 .buttonStyle(.borderless)
+        }
+    }
+}
+
+/// The panel's footer: Settings… and Quit Tend. Glass: menu items, one per
+/// line, as Control Center's "Sound Settings…" and a menu's last group
+/// are: primary text, highlighted while you hover, like a session's row.
+/// Before: borderless buttons on one line, Settings… with a gear.
+struct PanelFooter<Settings: View, Quit: View>: View {
+    @ViewBuilder let settings: Settings
+    @ViewBuilder let quit: Quit
+
+    var body: some View {
+        if #available(macOS 26, *), Design.glass {
+            VStack(alignment: .leading, spacing: 0) {
+                settings
+                quit
+            }
+            .buttonStyle(MenuItemButtonStyle())
+            // Let the highlights reach into the padding around the footer, so
+            // the text sits where it did.
+            .padding(.vertical, -4)
+        } else {
+            HStack {
+                settings
+                Spacer()
+                quit
+            }
+            .buttonStyle(.borderless)
+        }
+    }
+}
+
+/// The Settings… button's label. Glass: text, as in a menu. Before: with a gear.
+struct SettingsLabel: View {
+    var body: some View {
+        if #available(macOS 26, *), Design.glass {
+            Text("Settings…")
+        } else {
+            Label("Settings…", systemImage: "gearshape")
+        }
+    }
+}
+
+/// A button drawn as a menu item in the panel: the whole line, primary
+/// text, and while you hover, the same highlight as a session's row.
+struct MenuItemButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        MenuItem(configuration: configuration)
+    }
+
+    private struct MenuItem: View {
+        let configuration: ButtonStyleConfiguration
+        @State private var hovering = false
+
+        var body: some View {
+            configuration.label
+                .foregroundStyle(Color.primary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 6)
+                .padding(.vertical, 4)
+                .background(RoundedRectangle(cornerRadius: Design.rowCornerRadius)
+                    .fill(Color.primary.opacity(configuration.isPressed ? 0.1 : hovering ? 0.06 : 0)))
+                .contentShape(Rectangle())
+                .onHover { hovering = $0 }
         }
     }
 }

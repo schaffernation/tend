@@ -337,6 +337,40 @@ deliberate, and lives in `sync()`: `status()` itself only reads, so `wait`,
   content starts or stops fitting. On macOS 14 and 15, the middle scrolls
   between the header and footer, clipped, with a hairline under the header
   while it doesn't fit, to match the divider over the footer.
+- **The panel matches the Mac's own panels.** An audit on macOS 27.2
+  compared the panel with a menu bar menu and a status menu captured on the
+  same Mac. Control Center's modules couldn't be opened for capture,
+  because their menu bar items don't appear in the accessibility tree there.
+  - *Shadow.* The first glass version turned the window's shadow off,
+    because the shadow and the window server's edge outlined the window's
+    square corners, so the panel cast no shadow at all and looked unlike
+    every other panel. The window server draws both from the shape the
+    window draws, and `NSGlassEffectView` leaves that square. So
+    `PanelBackground` also clips the glass view's layer to the panel's
+    corner radius, the window keeps `hasShadow`, and the controller calls
+    `invalidateShadow()` after every fit, after the panel first draws, and
+    when the appearance changes. The shadow is the window server's, as an
+    `NSPopover`'s is. A menu draws a softer one inside its own window, about
+    twice as wide; matching that would mean a larger, mostly transparent
+    window whose shadow catches clicks meant for the app below, so it
+    wasn't done. The fallback's mask image already shaped its shadow.
+  - *Placement.* A menu bar menu's top sits 2 points below the menu bar;
+    the glass panel now does too, measured from the menu bar's bottom
+    rather than the item's button (`Design.menuBarGap`). The fallback keeps
+    4 points.
+  - *Section headers.* A menu's section header is 11 points semibold;
+    glass now uses `.subheadline` (11 points) instead of `.caption` (10).
+  - *Footer.* Control Center ends a module with a menu item ("Sound
+    Settings…"), and a status menu ends with Settings… and Quit, one per
+    line. Glass now shows Settings… and Quit Tend that way
+    (`PanelFooter`, `MenuItemButtonStyle`): primary text, the whole line,
+    and the same hover highlight as a row. The fallback keeps its gear and
+    one line.
+  - *Matched already:* the glass material and its edge in light and dark,
+    the corner radius (18, a popover's), the panel appearing at once and
+    fading out in about 0.15 seconds (a menu takes about 0.2), the
+    keyboard selection in the system's selection colors, and Control
+    Center's gray hover.
 - **Command-C copies the attach command.** Copying a session most often
   means "let me attach to it in a terminal I already have", so Command-C
   puts `tend ls --json`'s `attach` field (`tmux attach -t =NAME`, or your
@@ -412,9 +446,8 @@ deliberate, and lives in `sync()`: `status()` itself only reads, so `wait`,
   inside the panel's `containerShape`). Banners keep their tints, so orange
   still means "needs you" and red an error. Rows stay borderless. The
   panel's corner radius, 18 points, matches a popover measured on macOS 27;
-  a menu's is 12, which the fallback keeps. Glass draws its own shadow, so
-  the window's shadow is off on macOS 26 and later, where it outlined the
-  window's square corners.
+  a menu's is 12, which the fallback keeps. The panel casts the window's
+  shadow in both designs (see "The panel matches the Mac's own panels").
 - **The app icon is a layered Icon Composer document.** `app/AppIcon.icon`
   keeps the old design, with the gradient as the document's fill and the
   chevron and the sprout as separate glass layers, so macOS 26 and later
@@ -547,7 +580,14 @@ Untested, in rough order of risk:
    size with the list still focused, in both designs, light and dark. Not
    seen: scrolling with a trackpad or mouse wheel (synthetic wheel events
    don't reach a SwiftUI scroll view), a screen change while the panel is
-   open, and a drop onto the panel while it scrolls.
+   open, and a drop onto the panel while it scrolls. On November 23, 2026,
+   for the panel audit: the shadow and its corners at the fitting size and
+   with the form open, the 2-point gap, the footer's hover, and the
+   fallback drawing the same pixels as before, in both designs, light and
+   dark. Not seen: Control Center's own panels, the status item's pressed
+   highlight, and the panel on a second display. Status items in Control
+   Center open on mouse down; Tend's opens on mouse up, which wasn't
+   changed because it couldn't be tried with the item hidden.
 5. **Open in terminal** (iTerm through AppleScript) from inside a tend
    session fails with "Not authorized to send Apple events to iTerm
    (-1743)". When a launch agent starts the tmux server (see

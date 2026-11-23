@@ -45,6 +45,10 @@ This file lists the changes in each release of Tend. Versions follow
 
 ### Changed
 
+- On macOS 26 and later, the panel looks more like the Mac's own menu bar
+  panels: it hangs 2 points below the menu bar, as a menu does; section
+  headers are 11 points, as in a menu; and Settings… and Quit Tend are menu
+  items at the bottom, like Control Center's "Sound Settings…".
 - Tend calls tracked tmux sessions "sessions" everywhere. A new config file is
   named `sessions.json`. An existing `services.json` keeps working.
 - tend adds Homebrew and `~/.local/bin` to the end of your `PATH` instead of
@@ -72,6 +76,10 @@ This file lists the changes in each release of Tend. Versions follow
 
 ### Fixed
 
+- On macOS 26 and later, the panel had no shadow, so it didn't stand out
+  from what's under it the way the Mac's own panels do. It now casts one
+  that follows its rounded corners, and the shadow follows the panel as it
+  grows and shrinks.
 - Cut, Copy, Paste, Select All, and Undo didn't work in the panel's text
   fields.
 - VoiceOver read some icons by their symbol names, like "bubble.left, off".

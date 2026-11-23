@@ -788,6 +788,7 @@ final class StatusPanelController: NSObject, NSWindowDelegate, NSDraggingDestina
     private var modalDepth = 0
     private let host: NSHostingController<AnyView>
     private var sizeObservation: NSKeyValueObservation?
+    private var appearanceObservation: NSKeyValueObservation?
 
     init(model: Model) {
         self.model = model
@@ -801,6 +802,10 @@ final class StatusPanelController: NSObject, NSWindowDelegate, NSDraggingDestina
         // Grow and shrink with the content, keeping the top under the menu bar.
         sizeObservation = host.observe(\.preferredContentSize) { [weak self] _, _ in
             DispatchQueue.main.async { self?.fitToContent() }
+        }
+        // Light and dark draw a different edge, so the shadow follows.
+        appearanceObservation = NSApp.observe(\.effectiveAppearance) { [weak self] _, _ in
+            DispatchQueue.main.async { self?.panel.invalidateShadow() }
         }
         panel.delegate = self
         panel.onCancel = { [weak self] in self?.escape() }
@@ -898,6 +903,8 @@ final class StatusPanelController: NSObject, NSWindowDelegate, NSDraggingDestina
         DispatchQueue.main.async { [weak self] in
             guard let self, panel.isVisible else { return }
             statusItem.button?.highlight(true)
+            // Once the content has drawn, the shadow takes its shape.
+            panel.invalidateShadow()
         }
         // A click in another app closes the panel. Clicks in this app's
         // other windows, like Settings, take the key window, which closes it too.
@@ -947,7 +954,11 @@ final class StatusPanelController: NSObject, NSWindowDelegate, NSDraggingDestina
             // right end of the menu bar, where menu bar items are.
             item = NSRect(x: visible.maxX - size.width, y: visible.maxY, width: 0, height: 0)
         }
-        let top = item.minY - 4
+        // Hang from the bottom of the menu bar, as a menu does. The item's
+        // window spans the menu bar; while the menu bar hides itself, it's
+        // lower than the visible frame's top.
+        let menuBarBottom = hidden ? visible.maxY : min(buttonWindow.frame.minY, visible.maxY)
+        let top = menuBarBottom - Design.menuBarGap
         let maxHeight = max(100, top - visible.minY - 8)
         if abs(model.panelMaxHeight - maxHeight) > 0.5 { model.panelMaxHeight = maxHeight }
         guard size.width > 0, size.height > 0 else { return }
@@ -956,6 +967,9 @@ final class StatusPanelController: NSObject, NSWindowDelegate, NSDraggingDestina
         x = max(x, visible.minX + 6)
         let height = min(size.height, maxHeight)
         panel.setFrame(NSRect(x: x, y: top - height, width: size.width, height: height), display: true)
+        // The window server draws the shadow from the window's shape, so
+        // redraw it at the new size.
+        panel.invalidateShadow()
     }
 
     /// Run a modal window, like the folder picker, over the panel. The panel
@@ -1039,7 +1053,9 @@ final class TendPanel: NSPanel {
         collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient, .ignoresCycle]
         isOpaque = false
         backgroundColor = .clear
-        hasShadow = PanelBackground.windowShadow
+        // A shadow, as a menu has. It follows the background's rounded
+        // shape; `StatusPanelController.fitToContent` redraws it.
+        hasShadow = true
         hidesOnDeactivate = false
         isReleasedWhenClosed = false
         animationBehavior = .utilityWindow
@@ -1324,20 +1340,19 @@ struct ContentView: View {
     }
 
     var footer: some View {
-        HStack {
+        PanelFooter {
             Button {
                 openSettings()
                 NSApp.activate(ignoringOtherApps: true)
             } label: {
-                Label("Settings…", systemImage: "gearshape")
+                SettingsLabel()
             }
             .keyboardShortcut(",")
             .help("The apps Tend recognizes, the terminal it opens sessions in, startup, and other accounts")
-            Spacer()
+        } quit: {
             Button("Quit Tend") { NSApp.terminate(nil) }
                 .help("Quit the menu bar app. Your tmux sessions keep running.")
         }
-        .buttonStyle(.borderless)
     }
 }
 
@@ -1539,9 +1554,9 @@ struct SectionHeader<Trailing: View>: View {
 
     var body: some View {
         HStack {
-            Text(title).font(.caption).fontWeight(.semibold).foregroundStyle(.secondary)
+            Text(title).font(Design.sectionHeaderFont).fontWeight(.semibold).foregroundStyle(.secondary)
             Spacer()
-            trailing.font(.caption).buttonStyle(.borderless)
+            trailing.font(Design.sectionHeaderFont).buttonStyle(.borderless)
         }
         .padding(.horizontal, 6)
         .padding(.bottom, 2)
