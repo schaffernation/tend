@@ -243,6 +243,21 @@ deliberate, and lives in `sync()`: `status()` itself only reads, so `wait`,
 - **Row buttons show on hover**, except the main one (Open, or Start). A
   setting shows them all the time. The hidden buttons keep their space, so
   the row doesn't shift.
+- **Updates come from Sparkle, with a feed on our own site.** Tend ships
+  outside the App Store, so it needs its own updater. Sparkle is the
+  standard one for Mac apps: it checks a signed feed, verifies each update
+  with an EdDSA key as well as the Developer ID signature, and replaces the
+  app in place. Writing our own would mean redoing that security work.
+  `build.sh` downloads Sparkle's official release, pinned to one version and
+  checked by SHA-256 (`app/sparkle.sh`), instead of vendoring the framework,
+  so the repository stays small and an upgrade is a two-line change. Tend
+  isn't sandboxed, so the build leaves out Sparkle's XPC services. The
+  disk images stay on GitHub Releases; the appcast lives at `SUFeedURL` in
+  `Info.plist` (`https://schaffernation.com/tend/appcast.xml` for now),
+  because installed copies check that address forever, and a feed on our
+  own domain can move hosts without breaking them. A build without a real
+  `SUPublicEDKey`, like a fork's, doesn't start Sparkle at all. Tend is a menu bar app, so it brings
+  Sparkle's windows to the front itself.
 - **Action errors and refresh errors are separate.** An action's error stays
   until you close it or take another action. Before, the refresh that follows
   every action cleared it right away, so most action errors never showed.
@@ -362,6 +377,12 @@ Untested, in rough order of risk:
    claude.ai/code as disconnected for a while, and `claude rc` has no command
    to remove it. A session stopped minutes earlier can still show as
    connected until the app catches up.
+9. **Sparkle updates end to end.** The build, signing, and an appcast signed
+   with a throwaway key were checked, and the framework loads. No real
+   update has been installed yet: that needs two notarized releases and a
+   published feed. Also unseen: Sparkle's permission prompt (on the second
+   launch) and update window in the real menu bar, and whether they come to
+   the front.
 
 Ideas raised but not built:
 
