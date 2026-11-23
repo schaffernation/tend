@@ -161,6 +161,22 @@ deliberate, and lives in `sync()`: `status()` itself only reads, so `wait`,
   save it. `tests/test_tend.py` checks this with concurrent writers.
 - **Python standard library only** for the CLI, so it runs on any Mac with
   `python3`, including over ssh, with no install step.
+- **Homebrew ships a cask in a personal tap, not homebrew/cask.** The
+  official repository wants a notable project (for a self-submission, three
+  times the 30 forks, 30 watchers, or 75 stars it asks of others) at least 30
+  days old, so it waits until Tend has that. The cask in
+  `packaging/homebrew/Casks/tend.rb` is the source of truth;
+  `app/update-cask.sh` copies it into `schaffernation/homebrew-tend`. It
+  depends on the tmux formula but not on Python: Homebrew itself needs the
+  Command Line Tools, so `/usr/bin/python3` (3.9 on macOS 14) already works
+  wherever the cask installs, and a `python@3.x` formula would pull in a
+  large, versioned dependency the CLI doesn't need. `binary` links the
+  bundled `tend` onto `PATH`; `tend` resolves the link to its real path when
+  it calls itself. `auto_updates true` because Sparkle updates the app, so
+  `brew upgrade` leaves it alone. `zap` trashes preferences and caches but
+  keeps `~/.config/tend`: the session list is something you wrote, a source
+  checkout's CLI uses the same file, and your tmux sessions keep running
+  after an uninstall, so a reinstall should find them tracked.
 - **Typing the command into a shell** instead of `tmux new-session <cmd>`, for
   the user's environment and readable errors.
 - **Tooltips, not a hint line.** One version showed hover help in a line at

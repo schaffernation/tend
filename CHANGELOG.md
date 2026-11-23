@@ -29,6 +29,9 @@ This file lists the changes in each release of Tend. Versions follow
 - The app updates itself with [Sparkle](https://sparkle-project.org). In
   **Settings > General > Updates**, you can check for updates and turn
   automatic checks on or off.
+- A Homebrew cask, for `brew install --cask schaffernation/tend/tend`. It
+  installs tmux and links `tend` onto your `PATH`. `app/update-cask.sh`
+  points it at a new release.
 
 ### Changed
 

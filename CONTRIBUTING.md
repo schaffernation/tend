@@ -147,6 +147,40 @@ second person, active voice, present tense, and no "simply" or "just". An
 error message says what went wrong and what to do about it. In the app, hover
 text goes in `.help` tooltips.
 
+## Release
+
+Maintainers release Tend as a disk image on GitHub Releases, and as a
+Homebrew cask in the `schaffernation/homebrew-tend` tap.
+
+1. In `app/Info.plist`, raise `CFBundleShortVersionString` and
+   `CFBundleVersion`. In `CHANGELOG.md`, rename **Unreleased** to the new
+   version.
+2. Run `app/release.sh`. It builds, signs, and notarizes
+   `app/build/Tend-VERSION.dmg`. The comment at the top of the script says
+   how to store your notarization credentials.
+3. Publish the release with the `gh release create` command that
+   `release.sh` prints. The cask downloads `Tend-VERSION.dmg` from the
+   `vVERSION` release, so keep that file name.
+4. Update the cask with the uploaded disk image:
+
+   ```
+   app/update-cask.sh VERSION app/build/Tend-VERSION.dmg ~/src/homebrew-tend
+   ```
+
+   The script sets the version and SHA-256 in
+   `packaging/homebrew/Casks/tend.rb`, copies the cask into your clone of
+   the tap, and commits it there. Commit the change in this repository too.
+5. Check the cask, and then push the tap:
+
+   ```
+   brew audit --cask --strict --online schaffernation/tend/tend
+   git -C ~/src/homebrew-tend push
+   ```
+
+To set up the tap the first time, create an empty public repository named
+`schaffernation/homebrew-tend` on GitHub, clone it, and run step 4 with that
+clone. Homebrew finds `schaffernation/tend` at that repository by name.
+
 ## Send a pull request
 
 1. Open an issue first for anything bigger than a fix, so we can agree on the
