@@ -11,6 +11,18 @@ This file lists the changes in each release of Tend. Versions follow
   a restart dropped, like Remote Control chats after a reboot, and reopen one
   in its own session. The app shows them in a banner.
 - `tend config` shows where Tend keeps its files.
+- `tend peek NAME` shows the last lines of a session's pane without
+  attaching, and `tend rename OLD NEW` renames a session and keeps its
+  history. `tend ls --json` includes each session's attach command.
+- The app's session list works from the keyboard: the arrow keys select a
+  session, Return opens or starts it, Space shows its recent output, Delete
+  asks to stop tracking it, Command-C copies its attach command, and
+  Option-Command-C copies its folder's path. Esc closes the new-session form,
+  and then the panel.
+- Drop a folder on the menu bar icon or the panel to start a session there,
+  and drag a session out to Finder or a terminal.
+- A session's context menu has Show in Finder, Copy Path, Copy Attach
+  Command, Rename, and Show Recent Output.
 - Tests (`python3 -m unittest discover tests`) and a GitHub Actions workflow
   that runs them and builds the app.
 - A license (MIT), contributing guide, and security policy.
@@ -23,8 +35,19 @@ This file lists the changes in each release of Tend. Versions follow
   replacing it, so your own tools come first.
 - The app polls only what changes on its own, and asks `tend folders` for
   folder suggestions.
+- The menu bar panel behaves like a native one: it opens under the icon,
+  highlights the icon while it's open, closes when you click elsewhere, and
+  works over full-screen apps and on every Space.
+- The new-session form chooses its folder with a standard path pop-up, which
+  lists recent and nearby folders and opens the standard folder picker.
+- The Accounts settings list watched accounts with + and − buttons, as in
+  System Settings.
 
 ### Fixed
+
+- Cut, Copy, Paste, Select All, and Undo didn't work in the panel's text
+  fields.
+- VoiceOver read some icons by their symbol names, like "bubble.left, off".
 
 - Two Tend commands that changed the config at the same time, like the app's
   poll and `tend new`, could lose one of the changes. Changes now happen

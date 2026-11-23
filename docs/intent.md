@@ -34,8 +34,9 @@ Two parts. All behavior lives in the CLI; the app is a thin client.
 - **`bin/tend`** is a single-file Python 3 script that uses only the standard
   library. It owns the config, tmux, process detection, and start, stop, and
   restore. It must keep working over ssh, with no GUI.
-- **`app/Tend.swift`** is a SwiftUI `MenuBarExtra` app, built with plain
-  `swiftc` (no Xcode project). It runs its bundled copy of `tend ... --json` and
+- **`app/Tend.swift`** is a SwiftUI app, built with plain `swiftc` (no Xcode
+  project). A small AppKit controller owns the menu bar item and its panel
+  (see "The menu bar panel is AppKit" below); everything inside is SwiftUI. It runs its bundled copy of `tend ... --json` and
   renders the result. Every 5 seconds it polls what changes on its own
   (`ls`, `accounts`, and `dropped`). It loads apps, recipes, terminal
   settings, and the config path when it opens and after an action that
@@ -243,6 +244,66 @@ deliberate, and lives in `sync()`: `status()` itself only reads, so `wait`,
 - **Row buttons show on hover**, except the main one (Open, or Start). A
   setting shows them all the time. The hidden buttons keep their space, so
   the row doesn't shift.
+- **The menu bar panel is AppKit; what's in it is SwiftUI.** `MenuBarExtra`
+  can't take a drop on its icon, highlight the icon while its window is
+  open, or keep the window open while a folder picker runs. So
+  `StatusPanelController` owns an `NSStatusItem` and a borderless
+  `NSPanel` (`TendPanel`) that hosts `ContentView` in an
+  `NSHostingController`, and `TendApp` keeps only the `Settings` scene,
+  through an `NSApplicationDelegateAdaptor`. The panel is
+  `.nonactivatingPanel`: it takes the keyboard without making Tend the
+  active app, the way a menu does, so the app you were in keeps the menu
+  bar. It uses the `.menu` material, joins every Space and full-screen apps,
+  hangs under the item, and resizes with its content's
+  `preferredContentSize`. It closes when it loses the key window (as when
+  Settings opens), on a click in another app (a global event monitor), on
+  Esc, and when the Space changes, except while a modal window like the
+  folder picker is open; `StatusPanelController.runModal` drops the panel
+  below the picker for that time. The icon's symbols are drawn into one
+  template image, so the menu bar tints them. A drop on the icon goes to the
+  status item's window delegate, the documented route for a window whose
+  views don't take a drag. When the menu bar hides the item (it's full),
+  the panel opens at the right end of the menu bar.
+- **Copy and paste go through SwiftUI's main menu.** A SwiftUI app builds a
+  main menu with the standard Edit menu even when it's `LSUIElement`, so
+  Cut, Copy, Paste, Select All, and Undo exist. Because the panel doesn't
+  activate Tend, `TendPanel.performKeyEquivalent` passes key equivalents
+  to the main menu itself after the panel's own views decline them.
+- **The session list has one selection, like a source list.** Tracked and
+  untracked sessions form one focusable list (`.focusable` with
+  `onKeyPress`), not a SwiftUI `List`, because a `List` scrolls and has no
+  height of its own, and the panel sizes to its content. The selected row
+  uses the system's selection colors (`selectedContentBackgroundColor` while
+  the list has the keyboard, `unemphasizedSelectedContentBackgroundColor`
+  otherwise) with white text, and there's no separate focus ring, as in a
+  source list. The selection, the row being renamed, the inline
+  confirmation, and the open peek live in the model, so keys, Esc, and the
+  context menu all reach them. Rows still keep their order, and a selected
+  row shows its buttons, as a hovered one does.
+- **Command-C copies the attach command.** Copying a session most often
+  means "let me attach to it in a terminal I already have", so Command-C
+  puts `tend ls --json`'s `attach` field (`tmux attach -t =NAME`, or your
+  attach command) on the clipboard as text. Putting the folder there as a
+  file too would make Paste in Finder copy the folder, so the path is
+  separate: Copy Path in the context menu, or Option-Command-C, as in
+  Finder. Dragging a row out does offer both, since the drop target
+  chooses: Finder and Dock icons take the folder, text views take the
+  command.
+- **Delete asks first, in the row.** Delete and Command-Delete turn the row's
+  buttons into a red Stop tracking confirmation, like Restart's, rather than
+  a dialog.
+- **The folder chooser is a pop-up `NSPathControl`.** It replaced a SwiftUI
+  `Menu` labeled Choose, because the path control shows the folder with its
+  icon, lists its parent folders, takes a dropped folder, and looks like
+  every other folder pop-up on the Mac. `FolderPicker` rebuilds its menu in
+  `pathControl(_:willPopUp:)`: the parents, then the Recent and Nearby
+  folders from `tend folders`, then Choose…, which runs the open panel
+  through `runModal`. `NSPathControl` tells VoiceOver it's static text, so
+  a small subclass reports it as a pop-up button that VoiceOver can open.
+- **Peek is read-only and CLI-first.** `tend peek` reads the pane with
+  `capture-pane` and doesn't call `sync()`. The app shows its output under
+  the row, not in a popover: a popover is its own window, and clicking its
+  text would take the key window from the panel and close both.
 - **Action errors and refresh errors are separate.** An action's error stays
   until you close it or take another action. Before, the refresh that follows
   every action cleared it right away, so most action errors never showed.
@@ -336,13 +397,26 @@ Untested, in rough order of risk:
    tmux server. That `claude --resume ID --remote-control` reconnects a
    Remote Control chat's transcript in the Claude app isn't confirmed.
 3. **The plus button** starting a real `claude rc` session.
-4. **The app's UI** has been seen only as offscreen renders: the panel, the
-   new-session form, the question card, and the Settings panes, drawn from
-   `NSHostingView` against a scratch config. Not seen in the real menu bar
-   panel: hover (row buttons and highlight), the inline Restart confirmation,
-   whether Settings comes to the front when opened from the panel, the
-   keyboard shortcuts, and the folder pickers (`NSOpenPanel` from a menu bar
-   panel can appear behind other windows).
+4. **The app's UI.** On November 22, 2026 (macOS 27.2), a build ran against a
+   scratch config and tmux server, driven with key events posted to its
+   process only and with accessibility actions. Seen working in the real
+   panel, in light and dark: the panel's material, corners, and resizing;
+   the arrow keys, Return on a stopped session, Space and the peek area,
+   Delete and Command-Delete with the inline confirmation, Esc closing the
+   confirmation, then the form, then the panel; Command-N; Command-C and
+   Option-Command-C on a row; Command-A, C, X, V, and Z in the rename field;
+   inline rename through `tend rename`; the path pop-up's menu, and Choose…
+   opening the folder picker above the panel, which stayed open and took the
+   keyboard back; Settings opening from the panel and coming to the front,
+   with the panel closing; the Accounts list with + and −; the VoiceOver
+   labels and row actions, read through the accessibility API. Not seen:
+   the menu bar item itself, because the test Mac's menu bar was full and
+   hid it (so the icon, its highlight, and the panel's position under it),
+   any drag and drop (onto the icon, the panel, or the path control, or a
+   row dragged out), hover, a click on a row, and closing on a click in
+   another app. Synthetic mouse events posted to one process don't reach
+   its windows, and posting them system-wide would have clicked the
+   user's own windows.
 5. **Open in terminal** (iTerm through AppleScript) from inside a tend
    session fails with "Not authorized to send Apple events to iTerm
    (-1743)". When a launch agent starts the tmux server (see
