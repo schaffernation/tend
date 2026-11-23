@@ -93,6 +93,12 @@ Usage:
                                    path, for the menu bar app to show.
   tend apps enable|disable ID      Turn recognition of an app on or off.
   tend apps rm ID                  Remove an app you added.
+  tend rename OLD NEW              Rename a session: its tmux session, and
+                                   its entry and history if it's tracked.
+  tend peek NAME [--lines N] [--json]
+                                   Show the last N lines (default 20) that
+                                   the session's pane shows, without
+                                   attaching.
   tend attach NAME                 Attach to the session in this terminal.
   tend open NAME                   Open the session in a new terminal window.
   tend terminal [--app APP] [--attach PRESET|COMMAND] [--json]
@@ -587,6 +593,19 @@ def pane_tail(name, n=3):
     r = tmux("capture-pane", "-p", "-J", "-t", f"={name}:", check=False)
     lines = [line.rstrip() for line in r.stdout.splitlines() if line.strip()] if r.returncode == 0 else []
     return "\n".join(lines[-n:])
+
+
+def pane_lines(name, n):
+    """The last n lines a session's first pane shows, with scrollback if the
+    screen holds fewer. Trailing blank lines, like the empty screen below a
+    prompt, are dropped. Only reads."""
+    r = tmux("capture-pane", "-p", "-J", "-S", f"-{n}", "-t", f"={name}:", check=False)
+    if r.returncode:
+        raise TendError(r.stderr.strip() or f"can't read the pane of '{name}'.")
+    lines = [line.rstrip() for line in r.stdout.splitlines()]
+    while lines and not lines[-1]:
+        lines.pop()
+    return lines[-n:]
 
 
 PANE_FORMAT = "\t".join(
@@ -1144,10 +1163,16 @@ def status(cfg):
     metadata = {app["id"]: read_metadata(app) for app in app_list}
     rows = []
 
+    # Typed in a shell where tmux is on the PATH, so it doesn't need tmux's path.
+    has_tmux = bool(shutil.which("tmux"))
+
     def row(name, directory, **fields):
         return {
             "name": name,
             "dir": directory,
+            # The command that attaches a terminal to the session, as
+            # `tend open` would run it, for the app's Copy Attach Command.
+            "attach": attach_command(cfg, name, "tmux") if has_tmux else None,
             # Whether the session is named after its folder, so the app can
             # show the parent folder instead of repeating the name.
             "named_after_dir": bool(directory) and session_name(Path(directory).name) == name,
@@ -1828,6 +1853,51 @@ def cmd_rm(cfg, opts):
     print(f"Stopped tracking '{opts.name}'.")
 
 
+def rename(cfg, old, new):
+    """Rename a session: its tmux session, its config entry if it's tracked,
+    and what state.json keeps under its name. Returns the new name."""
+    new = session_name(new.strip())
+    if not new:
+        raise TendError("give a new name.")
+    if new == old:
+        return new
+    running = has_session(old)
+    with edit_config() as fresh:
+        session = find(fresh, old)
+        if not session and not running:
+            raise TendError(f"no session named '{old}'. Run `tend ls` to see them.")
+        if find(fresh, new) or has_session(new):
+            raise TendError(f"there's already a session named '{new}'.")
+        if running:
+            tmux("rename-session", "-t", f"={old}", new)
+        if session:
+            session["name"] = new
+    with edit_state() as state:
+        for key in ("history", "live"):
+            if old in state.get(key, {}):
+                state[key][new] = state[key].pop(old)
+        for i, entry in enumerate(state.get("dropped", [])):
+            entry = dropped_entry(entry)
+            if entry["session"] == old:
+                state["dropped"][i] = {**entry, "session": new}
+    return new
+
+
+def cmd_rename(cfg, opts):
+    new = rename(cfg, opts.old, opts.new)
+    print(f"Renamed '{opts.old}' to '{new}'.")
+
+
+def cmd_peek(cfg, opts):
+    if not has_session(opts.name):
+        raise TendError(f"'{opts.name}' isn't running.")
+    lines = pane_lines(opts.name, max(1, opts.lines))
+    if opts.json:
+        print_json({"name": opts.name, "lines": lines})
+    else:
+        print("\n".join(lines))
+
+
 def cmd_start(cfg, opts):
     print(start(cfg, need(cfg, opts.name), opts.fresh))
 
@@ -2242,6 +2312,15 @@ def build_parser():
         ("open", cmd_open, "open a session in a new terminal window"),
     ):
         command(name, func, help=text).add_argument("name")
+
+    sp = command("rename", cmd_rename, help="rename a session, tracked or not")
+    sp.add_argument("old")
+    sp.add_argument("new")
+
+    sp = command("peek", cmd_peek, help="show the last lines a session's pane shows")
+    sp.add_argument("name")
+    sp.add_argument("--lines", type=int, default=20, help="how many lines (default 20)")
+    sp.add_argument("--json", action="store_true")
 
     sp = command("history", cmd_history, help="list the conversations a session has run")
     sp.add_argument("name")
