@@ -20,6 +20,8 @@ records why Tend works the way it does, and which parts are still untested.
   `app/build.sh --no-install && app/make-dmg.sh app/build/Tend.app /tmp/Tend.dmg`.
   `app/sparkle.sh` downloads the pinned Sparkle release that the build and
   release scripts use, and `app/appcast.sh` makes the update feed.
+- `site/` is Tend's website, plain static files with no build step. See
+  [site/README.md](site/README.md).
 - `app/Updates.swift` holds the app's Sparkle code: the updater and the
   **Updates** settings.
 - `skills/tend` is a Claude Code skill that drives the CLI.
@@ -161,22 +163,27 @@ Homebrew cask in the `schaffernation/homebrew-apps` tap.
    `CFBundleVersion`. In `CHANGELOG.md`, rename **Unreleased** to the new
    version.
 2. Run `app/release.sh`. It builds, signs, and notarizes
-   `app/build/Tend-VERSION.dmg`. The comment at the top of the script says
-   how to store your notarization credentials.
+   `app/build/Tend-VERSION.dmg`, and adds the release to the Sparkle feed in
+   `site/appcast.xml`. The comment at the top of the script says how to
+   store your notarization credentials.
 3. Publish the release with the `gh release create` command that
    `release.sh` prints. The cask downloads `Tend-VERSION.dmg` from the
-   `vVERSION` release, so keep that file name.
-4. Update the cask with the uploaded disk image, then commit and push it:
+   `vVERSION` release, so keep that file name. Publish the release before
+   you push the feed, because the feed's download link points at it.
+4. Update the cask with the uploaded disk image, then commit it with the
+   feed, and push:
 
    ```
    app/update-cask.sh VERSION app/build/Tend-VERSION.dmg
-   git commit -am "Homebrew: Tend VERSION" && git push
+   git add site/appcast.xml packaging/homebrew/tend.rb
+   git commit -m "Release Tend VERSION" && git push
    ```
 
-   The script sets the version and SHA-256 in `packaging/homebrew/tend.rb`.
-   The `schaffernation/homebrew-apps` tap copies the cask from this
-   repository within an hour. To copy it now, run the tap's **Sync casks**
-   workflow on GitHub.
+   Pushing to `main` deploys the website in `site/`, so installed copies of
+   Tend see the update right away. `update-cask.sh` sets the version and
+   SHA-256 in `packaging/homebrew/tend.rb`. The `schaffernation/homebrew-apps`
+   tap copies the cask from this repository within an hour. To copy it now,
+   run the tap's **Sync casks** workflow on GitHub.
 5. Once the tap has it, check the cask:
 
    ```

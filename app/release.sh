@@ -53,11 +53,17 @@ spctl --assess --type open --context context:primary-signature --verbose=2 $dmg
 # releases/latest/download/Tend.dmg link.
 cp $dmg $latest
 
+# The Sparkle feed, in site/appcast.xml.
+$here/appcast.sh $dmg
+
 print
 print "Built $dmg and $latest"
-print "To publish them:"
-print "  gh release create v$version $dmg $latest --title 'Tend $version' --generate-notes"
-print "Then update the Homebrew cask, and commit and push it:"
-print "  $here/update-cask.sh $version $dmg"
-
-$here/appcast.sh $dmg
+print "To publish them, in this order:"
+print "1. Publish the GitHub release, so the feed's download link works:"
+print "     gh release create v$version $dmg $latest --title 'Tend $version' --generate-notes"
+print "2. Update the Homebrew cask:"
+print "     $here/update-cask.sh $version $dmg"
+print "3. Commit the feed and the cask, and push. Pushing deploys the site, so"
+print "   installed copies of Tend see the update right away:"
+print "     git add site/appcast.xml packaging/homebrew/tend.rb"
+print "     git commit -m 'Release Tend $version' && git push"
