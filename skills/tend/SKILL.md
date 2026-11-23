@@ -108,13 +108,20 @@ Show this, then ask what they'd like to do:
   AUTO column says whether the session restores at login, and its CHAT
   column says whether tend brings back its conversation (`restore`) or
   starts its plain command every time (`fresh`). Use `tend ls --json` when
-  you need fields (`autostart`, `restore_conversation`).
+  you need fields (`autostart`, `restore_conversation`, and `attach`, the
+  command that attaches a terminal to the session).
 - When `tend ls` says a session is waiting on a question (like Claude's
   trust prompt), ask the user, then run `tend answer NAME ANSWER` (or
   `--text TEXT` for a prompt tend doesn't know), and `tend wait NAME` to
   confirm it carried on.
 - `tend open NAME` opens a session in a terminal window. `tend start NAME`
   starts a tracked session that's stopped.
+- `tend peek NAME [--lines N]` shows the last lines (20 by default) of a
+  running session's pane, without attaching. Use it to see what a session
+  is doing, or why it's stuck, before you suggest a restart.
+- `tend rename OLD NEW` renames a session: its tmux session and, for a
+  tracked one, its entry and conversation history. Renaming the session you
+  run in changes the name `tmux display -p '#S'` prints.
 - `tend snapshot [NAME]` tracks running tmux sessions, so tend restores them.
 - `tend autostart NAME on|off` sets whether a restart brings it back.
 - `tend restore-conversation NAME on|off` sets whether tend brings back its

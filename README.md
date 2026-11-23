@@ -111,6 +111,32 @@ tend restore
 For every command, run `tend --help`. To see where Tend keeps its files, run
 `tend config`.
 
+## Use the menu bar app
+
+Click Tend's icon in the menu bar to see your sessions. To start a session in
+a folder, drop the folder on the icon or on the panel, or click the plus
+button and choose a folder.
+
+The session list works from the keyboard:
+
+| Key | Action |
+| --- | --- |
+| Up Arrow, Down Arrow | Select a session |
+| Return | Open the session in your terminal, or start it if it's stopped |
+| Space | Show or hide the last lines the session printed |
+| Command-C | Copy the command that attaches a terminal to the session |
+| Option-Command-C | Copy the path of the session's folder |
+| Delete | Stop tracking the session (Tend asks first) |
+| Command-N | Start a new session |
+| Esc | Close the new-session form, and then the panel |
+
+Right-click a session for more, like Show in Finder, Copy Path, Rename, and
+its restore settings. You can also drag a session to Finder, to a
+terminal app's Dock icon, or into a terminal window.
+
+To see a session's recent output in a terminal, run `tend peek NAME`. To
+rename a session, run `tend rename OLD NEW`.
+
 ## Claude Code
 
 When a session runs Claude Code, Tend does the following:

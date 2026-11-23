@@ -293,6 +293,27 @@ class TestRestoreConversation(TendTestCase):
         self.assertNotIn("restore_conversation", self.tend.load()["sessions"][0])
 
 
+class TestRename(TendTestCase):
+    def test_rename_moves_state_kept_under_the_name(self):
+        self.tend.save({"sessions": [{"name": "a", "dir": "/tmp", "command": "x"}]})
+        self.tend.save_state(
+            {
+                "history": {"a": [{"id": "h"}], "b": []},
+                "live": {"a": {"pid": 1}},
+                "dropped": [{"service": "a", "id": "d", "dropped_at": 1}, {"session": "b", "id": "e", "dropped_at": 1}],
+            }
+        )
+        with mock.patch.object(self.tend, "has_session", return_value=False):
+            self.assertEqual(self.tend.rename(self.tend.load(), "a", "c.d"), "c-d")
+            with self.assertRaises(self.tend.TendError):
+                self.tend.rename(self.tend.load(), "nosuch", "x")
+        self.assertEqual([s["name"] for s in self.tend.load()["sessions"]], ["c-d"])
+        state = self.tend.load_state()
+        self.assertEqual(state["history"], {"c-d": [{"id": "h"}], "b": []})
+        self.assertEqual(state["live"], {"c-d": {"pid": 1}})
+        self.assertEqual([d["session"] for d in state["dropped"]], ["c-d", "b"])
+
+
 class TestConfigFiles(TendTestCase):
     def test_missing_config_gives_defaults(self):
         self.assertEqual(self.tend.load()["sessions"], [])
@@ -502,6 +523,35 @@ class TestEndToEnd(unittest.TestCase):
         r = self.tend("wait", "q", "--timeout", "20", check=False)
         self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
         self.assertIn("waiting: Your name", r.stdout)
+
+    def test_peek_shows_the_last_lines(self):
+        self.tend("add", "p", "--dir", str(self.dir), "--start", "--", "sh", "-c", "seq 1 50; sleep 600")
+        self.eventually(lambda: self.tend("peek", "p", "--lines", "5").stdout.endswith("\n50\n"))
+        lines = json.loads(self.tend("peek", "p", "--lines", "3", "--json").stdout)["lines"]
+        self.assertEqual(lines, ["48", "49", "50"])
+        self.tend("stop", "p")
+        r = self.tend("peek", "p", check=False)
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("isn't running", r.stderr)
+
+    def test_rename_moves_the_tmux_session_and_the_entry(self):
+        self.tend("add", "old", "--dir", str(self.dir), "--start", "--", "sleep", "600")
+        self.tend("add", "taken", "--dir", str(self.dir), "--", "sleep", "600")
+        self.eventually(lambda: self.rows()["old"]["state"] == "running")
+        r = self.tend("rename", "old", "taken", check=False)
+        self.assertIn("already a session named 'taken'", r.stderr)
+        self.assertIn("Renamed 'old' to 'new-name'", self.tend("rename", "old", "new.name").stdout)
+        rows = self.rows()
+        self.assertNotIn("old", rows)
+        self.assertEqual(rows["new-name"]["state"], "running")
+        self.assertTrue(rows["new-name"]["managed"])
+        self.assertEqual(rows["new-name"]["attach"], "tmux attach -t =new-name")
+        # An untracked session renames in tmux only.
+        subprocess.run(["tmux", "new-session", "-d", "-s", "loose", "sleep 700"], env=self.env, check=True)
+        self.tend("rename", "loose", "free")
+        rows = self.rows()
+        self.assertFalse(rows["free"]["managed"])
+        self.assertNotIn("loose", rows)
 
     def test_errors_are_one_line(self):
         r = self.tend("start", "nosuch", check=False)
