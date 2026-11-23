@@ -367,10 +367,11 @@ open /tmp/Tend.dmg
 `make-dmg.sh` writes the window layout itself, so it doesn't need to script
 Finder or ask for Automation permission, and it works over SSH and in tmux.
 
-At the end, `release.sh` runs `app/appcast.sh`, which writes
-`app/build/appcast/appcast.xml`: the Sparkle feed that tells installed copies
-of Tend about the release. Its release notes come from the version's section
-of [CHANGELOG.md](CHANGELOG.md).
+`release.sh` also runs `app/appcast.sh`, which writes `site/appcast.xml`:
+the Sparkle feed that tells installed copies of Tend about the release. Its
+release notes come from the version's section of [CHANGELOG.md](CHANGELOG.md).
+Tend's website, in [`site/`](site/README.md), serves the feed at the
+`SUFeedURL` in `app/Info.plist`, and pushing to `main` deploys it.
 
 Before the first release, set up update signing once:
 
@@ -383,10 +384,10 @@ Before the first release, set up update signing once:
    update anymore.
 3. In `app/Info.plist`, replace the `SUPublicEDKey` placeholder with the
    public key, and commit it.
-4. Make sure you can publish files at the `SUFeedURL` in `app/Info.plist`
-   (`https://tend.schaffernation.com/appcast.xml`). To move the feed, change
-   that one value, before the first release if you can: released copies
-   keep checking the address they shipped with.
+4. Make sure the website in `site/` is deployed at the `SUFeedURL` in
+   `app/Info.plist` (`https://tend.schaffernation.com/appcast.xml`). To move
+   the feed, change that one value, before the first release if you can:
+   released copies keep checking the address they shipped with.
 
 For each release:
 
@@ -396,8 +397,12 @@ For each release:
 3. Run `app/release.sh`.
 4. Publish the disk image on GitHub Releases with the `gh release create`
    command that `release.sh` prints. The appcast's download link points at
-   `releases/download/vVERSION/Tend-VERSION.dmg`.
-5. Upload `app/build/appcast/appcast.xml` to the `SUFeedURL`.
+   `releases/download/vVERSION/Tend-VERSION.dmg`, so publish the release
+   before the feed.
+5. Commit and push `site/appcast.xml`, with the Homebrew cask (see
+   [CONTRIBUTING.md](CONTRIBUTING.md#release)). Pushing deploys the site, so
+   installed copies of Tend see the update right away. The site's download
+   button shows the new version too.
 
 To make the appcast again without rebuilding, run `app/appcast.sh`.
 

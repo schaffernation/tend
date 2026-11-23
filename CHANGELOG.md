@@ -37,6 +37,11 @@ This file lists the changes in each release of Tend. Versions follow
   window size. `app/make-dmg.sh` builds it. Each release also has a
   `Tend.dmg`, so `releases/latest/download/Tend.dmg` always gets the newest
   version.
+- A website, in `site/`: plain static files for
+  [tend.schaffernation.com](https://tend.schaffernation.com), with a download
+  button that shows the newest version from the Sparkle feed. `app/appcast.sh`
+  now writes the feed to `site/appcast.xml`, and `site/make-images.swift`
+  makes the site's icons and link preview image from the app icon.
 
 ### Changed
 

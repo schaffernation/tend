@@ -344,7 +344,14 @@ deliberate, and lives in `sync()`: `status()` itself only reads, so `wait`,
   `Info.plist` (`https://tend.schaffernation.com/appcast.xml`), because
   installed copies check that address forever. The feed is on Tend's own
   subdomain, so it depends only on a DNS record: moving Tend's site to
-  another host can't break it. A build without a real
+  another host can't break it.
+- **The website lives in `site/`, and owns the feed.** It's plain static
+  files (HTML, CSS, a little JavaScript, no build step), so any static host
+  can serve the folder as is. `app/appcast.sh` writes `site/appcast.xml`, and
+  pushing to `main` deploys the site, feed included, so publish a release on
+  GitHub before you push its feed. The page reads the same feed to show the
+  current version, so it needs no edit when Tend ships. Until the first
+  release there's no feed, and the page says Tend isn't released yet. A build without a real
   `SUPublicEDKey`, like a fork's, doesn't start Sparkle at all. Tend is a menu bar app, so it brings
   Sparkle's windows to the front itself.
 - **Action errors and refresh errors are separate.** An action's error stays

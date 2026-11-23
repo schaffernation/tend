@@ -15,10 +15,13 @@
 # rename "Unreleased" to the version before you release.
 #
 # The script starts from the published appcast at SUFeedURL in Info.plist, so
-# earlier releases stay in the feed, and writes app/build/appcast/appcast.xml.
-# Upload that file to SUFeedURL after you publish the GitHub release, because
-# its download link points at the release's disk image. Set
-# TEND_DOWNLOAD_URL_PREFIX to download from somewhere other than GitHub
+# earlier releases stay in the feed, and writes site/appcast.xml. If it can't
+# download the published appcast, it starts from site/appcast.xml instead.
+# The website in site/ serves the feed at SUFeedURL, and pushing to main
+# deploys it. So publish the GitHub release first, and then commit and push
+# site/appcast.xml: its download link points at the release's disk image,
+# and installed copies of Tend see the update as soon as the site deploys.
+# Set TEND_DOWNLOAD_URL_PREFIX to download from somewhere other than GitHub
 # Releases.
 
 emulate -L zsh
@@ -26,6 +29,7 @@ setopt err_exit no_unset pipe_fail
 
 here=${0:A:h}
 build=$here/build
+site_feed=$here/../site/appcast.xml
 source $here/sparkle.sh
 
 plist=$here/Info.plist
@@ -64,6 +68,9 @@ fi
 
 if curl -fsSL -o $out/appcast.xml $feed 2>/dev/null && grep -q '<rss' $out/appcast.xml; then
   print "Adding Tend $version to the appcast at $feed."
+elif [[ -f $site_feed ]] && grep -q '<rss' $site_feed; then
+  cp $site_feed $out/appcast.xml
+  print "Can't download $feed. Adding Tend $version to site/appcast.xml."
 else
   rm -f $out/appcast.xml
   print "No appcast at $feed yet. Starting a new one."
@@ -84,6 +91,10 @@ if ! grep -q "url=\"$prefix${dmg:t}\".*sparkle:edSignature=" $out/appcast.xml; t
   exit 1
 fi
 
+cp $out/appcast.xml $site_feed
+
 print
-print "Built $out/appcast.xml"
-print "After you publish the GitHub release, upload it to $feed."
+print "Wrote site/appcast.xml."
+print "Publish the GitHub release first. Then commit and push site/appcast.xml:"
+print "pushing deploys the site, and installed copies of Tend see the update at"
+print "$feed right away."
