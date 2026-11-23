@@ -26,6 +26,7 @@ app=$build/Tend.app
 profile=${TEND_NOTARY_PROFILE:-tend-notary}
 version=$(/usr/libexec/PlistBuddy -c 'Print CFBundleShortVersionString' $here/Info.plist)
 dmg=$build/Tend-$version.dmg
+latest=$build/Tend.dmg
 
 $here/build.sh --no-install --release
 
@@ -37,16 +38,10 @@ xcrun notarytool submit $build/Tend.zip --keychain-profile $profile --wait
 xcrun stapler staple $app
 rm $build/Tend.zip
 
-# Package the app with a link to /Applications, then sign and notarize the
-# disk image too.
+# Package the app in a disk image with a designed window (see make-dmg.sh),
+# then sign and notarize the disk image too.
 print "Building $dmg…"
-stage=$build/dmg
-rm -rf $stage $dmg
-mkdir -p $stage
-cp -R $app $stage/
-ln -s /Applications $stage/Applications
-hdiutil create -volname "Tend $version" -srcfolder $stage -fs HFS+ -format UDZO -ov $dmg
-rm -rf $stage
+$here/make-dmg.sh $app $dmg
 codesign --force --timestamp --sign ${TEND_SIGN_IDENTITY:-"Developer ID Application"} $dmg
 
 print "Notarizing $dmg…"
@@ -54,7 +49,11 @@ xcrun notarytool submit $dmg --keychain-profile $profile --wait
 xcrun stapler staple $dmg
 spctl --assess --type open --context context:primary-signature --verbose=2 $dmg
 
+# A copy with a name that doesn't change, for the
+# releases/latest/download/Tend.dmg link.
+cp $dmg $latest
+
 print
-print "Built $dmg"
-print "To publish it:"
-print "  gh release create v$version $dmg --title 'Tend $version' --generate-notes"
+print "Built $dmg and $latest"
+print "To publish them:"
+print "  gh release create v$version $dmg $latest --title 'Tend $version' --generate-notes"

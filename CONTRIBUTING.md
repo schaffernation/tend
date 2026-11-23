@@ -13,7 +13,11 @@ records why Tend works the way it does, and which parts are still untested.
 - `app/Tend.swift` is the menu bar app. It runs its bundled copy of
   `tend ... --json` and shows the result. It has no behavior of its own.
 - `app/build.sh` builds the app, and `app/release.sh` builds a signed,
-  notarized disk image.
+  notarized disk image. `app/make-dmg.sh` packages the app in the disk
+  image with its designed window, drawn by `app/make-dmg-background.swift`
+  and laid out by `app/make-dsstore.py`. Run it on its own to check the
+  window without notarizing:
+  `app/build.sh --no-install && app/make-dmg.sh app/build/Tend.app /tmp/Tend.dmg`.
 - `skills/tend` is a Claude Code skill that drives the CLI.
 
 Three rules keep the project in shape:

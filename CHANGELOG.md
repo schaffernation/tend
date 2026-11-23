@@ -14,6 +14,11 @@ This file lists the changes in each release of Tend. Versions follow
 - Tests (`python3 -m unittest discover tests`) and a GitHub Actions workflow
   that runs them and builds the app.
 - A license (MIT), contributing guide, and security policy.
+- The release disk image opens to a designed window, with the Tend volume
+  icon, a background with an arrow from Tend to **Applications**, and a fixed
+  window size. `app/make-dmg.sh` builds it. Each release also has a
+  `Tend.dmg`, so `releases/latest/download/Tend.dmg` always gets the newest
+  version.
 
 ### Changed
 
