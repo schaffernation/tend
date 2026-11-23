@@ -783,6 +783,8 @@ final class StatusPanelController: NSObject, NSWindowDelegate, NSDraggingDestina
     private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
     private let panel: TendPanel
     private var monitors: [Any] = []
+    /// Takes presses on the menu bar item, so the panel opens on mouse down.
+    private var buttonMonitor: Any?
     private var observers: [AnyCancellable] = []
     /// While a modal window, like the folder picker, is open, the panel stays.
     private var modalDepth = 0
@@ -813,9 +815,10 @@ final class StatusPanelController: NSObject, NSWindowDelegate, NSDraggingDestina
         model.closePanel = { [weak self] in self?.close() }
 
         if let button = statusItem.button {
+            // The action is for VoiceOver's press. A mouse press is handled
+            // by the monitor below, so the panel opens on mouse down.
             button.target = self
             button.action = #selector(togglePanel(_:))
-            button.sendAction(on: [.leftMouseUp, .rightMouseUp])
             button.imagePosition = .imageLeading
             button.setAccessibilityLabel("Tend")
             // The button's own window takes drags for it: AppKit hands a drag
@@ -824,6 +827,19 @@ final class StatusPanelController: NSObject, NSWindowDelegate, NSDraggingDestina
                 window.registerForDraggedTypes([.fileURL])
                 window.delegate = self
             }
+        }
+        // Open and close on mouse down, as Control Center's items do. The
+        // button's own tracking acts on mouse up and drops its pressed look
+        // when the click ends, so take the press before the button sees it.
+        buttonMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] event in
+            let windowNumber = event.windowNumber
+            let handled = MainActor.assumeIsolated { () -> Bool in
+                guard let self, let window = self.statusItem.button?.window,
+                      window.windowNumber == windowNumber else { return false }
+                self.togglePanel(nil)
+                return true
+            }
+            return handled ? nil : event
         }
         updateButton()
         // Redraw the icon after each change, once the change has happened.
@@ -898,11 +914,10 @@ final class StatusPanelController: NSObject, NSWindowDelegate, NSDraggingDestina
         fitToContent()
         panel.makeKeyAndOrderFront(nil)
         model.panelOpens += 1
-        // The button unhighlights itself when the click ends, so highlight
-        // it after that.
+        // The item looks pressed for as long as the panel is open.
+        statusItem.button?.highlight(true)
         DispatchQueue.main.async { [weak self] in
             guard let self, panel.isVisible else { return }
-            statusItem.button?.highlight(true)
             // Once the content has drawn, the shadow takes its shape.
             panel.invalidateShadow()
         }

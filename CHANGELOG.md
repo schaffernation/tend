@@ -45,6 +45,10 @@ This file lists the changes in each release of Tend. Versions follow
 
 ### Changed
 
+- Tend's menu bar item opens and closes its panel as soon as you press the
+  mouse button, as Control Center's items do, and looks pressed while the
+  panel is open.
+
 - On macOS 26 and later, the panel looks more like the Mac's own menu bar
   panels: it hangs 2 points below the menu bar, as a menu does; section
   headers are 11 points, as in a menu; and Settings… and Quit Tend are menu

@@ -337,6 +337,16 @@ deliberate, and lives in `sync()`: `status()` itself only reads, so `wait`,
   content starts or stops fitting. On macOS 14 and 15, the middle scrolls
   between the header and footer, clipped, with a hairline under the header
   while it doesn't fit, to match the divider over the footer.
+- **The menu bar item acts on mouse down.** Control Center's items open
+  their panels as soon as you press, and close them the same way, and the
+  item looks pressed for as long as the panel is open. Tend's button acted
+  on mouse up and dropped its pressed look when the click ended, so a
+  local event monitor takes presses on the item's window before the button
+  tracks them. The button's action stays, for VoiceOver's press. The panel
+  stays an `NSPanel`, as `MenuBarExtra` itself is: `NSPopover` always
+  draws an arrow, and an `NSMenu` with custom views takes over input while
+  it's open, which breaks the form's text fields, the folder pop-up, and
+  dragging a row out.
 - **The panel matches the Mac's own panels.** An audit on macOS 27.2
   compared the panel with a menu bar menu and a status menu captured on the
   same Mac. Control Center's modules couldn't be opened for capture,
@@ -585,9 +595,9 @@ Untested, in rough order of risk:
    with the form open, the 2-point gap, the footer's hover, and the
    fallback drawing the same pixels as before, in both designs, light and
    dark. Not seen: Control Center's own panels, the status item's pressed
-   highlight, and the panel on a second display. Status items in Control
-   Center open on mouse down; Tend's opens on mouse up, which wasn't
-   changed because it couldn't be tried with the item hidden.
+   highlight, and the panel on a second display. The item now opens and
+   closes the panel on mouse down, like Control Center's; that hasn't been
+   tried on a visible item either.
 5. **Open in terminal** (iTerm through AppleScript) from inside a tend
    session fails with "Not authorized to send Apple events to iTerm
    (-1743)". When a launch agent starts the tmux server (see
