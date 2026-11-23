@@ -32,6 +32,11 @@ This file lists the changes in each release of Tend. Versions follow
 - A Homebrew cask, for `brew install --cask schaffernation/tend/tend`. It
   installs tmux and links `tend` onto your `PATH`. `app/update-cask.sh`
   points it at a new release.
+- The release disk image opens to a designed window, with the Tend volume
+  icon, a background with an arrow from Tend to **Applications**, and a fixed
+  window size. `app/make-dmg.sh` builds it. Each release also has a
+  `Tend.dmg`, so `releases/latest/download/Tend.dmg` always gets the newest
+  version.
 
 ### Changed
 

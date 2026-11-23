@@ -348,6 +348,25 @@ To build a signed, notarized disk image, run `app/release.sh`. You need a
 Developer ID Application certificate in your keychain. The script explains
 the one-time notarization setup in its header.
 
+`release.sh` writes `app/build/Tend-VERSION.dmg` and a copy named
+`app/build/Tend.dmg`. Upload both to the release, so that
+`https://github.com/schaffernation/tend/releases/latest/download/Tend.dmg`
+always downloads the newest version.
+
+The disk image opens to a designed Finder window: Tend on the left, an
+**Applications** link on the right, and a background with an arrow between
+them. `app/make-dmg.sh` builds it, and `release.sh` runs it. To check the
+window without signing or notarizing, run:
+
+```
+app/build.sh --no-install
+app/make-dmg.sh app/build/Tend.app /tmp/Tend.dmg
+open /tmp/Tend.dmg
+```
+
+`make-dmg.sh` writes the window layout itself, so it doesn't need to script
+Finder or ask for Automation permission, and it works over SSH and in tmux.
+
 At the end, `release.sh` runs `app/appcast.sh`, which writes
 `app/build/appcast/appcast.xml`: the Sparkle feed that tells installed copies
 of Tend about the release. Its release notes come from the version's section
