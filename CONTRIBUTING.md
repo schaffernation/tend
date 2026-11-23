@@ -89,6 +89,17 @@ against a scratch config and a separate tmux server instead.
 5. When you're done, stop the scratch server with `tmux kill-server`, in the
    same shell.
 
+Two defaults help you check the panel, given as arguments after `--args` so
+they last only for that run. `-TendShowPanelAtLaunch YES` opens the panel a
+second after the app starts, which you need when a full menu bar hides
+Tend's icon. `-TendAppearance Dark` (or `Light`) draws the app in that
+appearance without changing your Mac's:
+
+```
+open -n --env TEND_CONFIG=$TEND_CONFIG --env TMUX_TMPDIR=$TMUX_TMPDIR app/build/Tend.app \
+  --args -TendShowPanelAtLaunch YES -TendAppearance Dark
+```
+
 To test Claude support without starting a real `claude rc`, use a fake
 `claude` script. A real one leaves a disconnected entry in your Claude app,
 and answering its trust prompt changes `~/.claude.json`. tend matches a

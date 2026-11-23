@@ -747,7 +747,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusPanel: StatusPanelController?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // For testing, without changing the Mac's appearance:
+        // open -n Tend.app --args -TendAppearance Dark (or Light)
+        if let name = UserDefaults.standard.string(forKey: "TendAppearance") {
+            NSApp.appearance = NSAppearance(named: name == "Dark" ? .darkAqua : .aqua)
+        }
         statusPanel = StatusPanelController(model: model)
+        // For testing, on a Mac whose full menu bar hides the item:
+        // open -n Tend.app --args -TendShowPanelAtLaunch YES
+        if UserDefaults.standard.bool(forKey: "TendShowPanelAtLaunch") {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in self?.statusPanel?.show() }
+        }
     }
 }
 
