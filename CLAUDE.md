@@ -46,7 +46,11 @@ what's untested). `CONTRIBUTING.md` covers setup and the pull request process.
 - `app/release.sh` builds, signs, notarizes, and packages a disk image.
   To check the disk image's window without notarizing, run
   `app/make-dmg.sh app/build/Tend.app /tmp/Tend.dmg` after a build.
-  `app/make-icon.swift` draws the icon; rerun it after changing the design.
+  `app/make-icon.swift` draws the icon as a layered Icon Composer document,
+  `app/AppIcon.icon`; rerun it after changing the design, then run
+  `app/make-icon-assets.sh`, which compiles it into the committed
+  `Assets.car`, `AppIcon.icns`, and `AppIcon.png` (it needs Xcode 26 or
+  later; `build.sh` doesn't).
   `app/screenshot/make.sh` draws the README screenshots from the real panel,
   with example sessions from `app/screenshot/fake-tend`; rerun it after
   changing the panel.

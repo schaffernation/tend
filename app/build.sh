@@ -39,7 +39,8 @@ source $here/sparkle.sh
 rm -rf $app $build/arch
 mkdir -p $app/Contents/MacOS $app/Contents/Resources $app/Contents/Frameworks $build/arch
 cp $here/Info.plist $app/Contents/Info.plist
-cp $here/AppIcon.icns $app/Contents/Resources/AppIcon.icns
+# The icon, compiled from AppIcon.icon by make-icon-assets.sh.
+cp $here/Assets.car $here/AppIcon.icns $app/Contents/Resources/
 cp $here/../bin/tend $app/Contents/Resources/tend
 chmod 755 $app/Contents/Resources/tend
 
@@ -58,7 +59,7 @@ for arch in arm64 x86_64; do
     -F $sparkle -framework Sparkle \
     -Xlinker -rpath -Xlinker @executable_path/../Frameworks \
     -o $build/arch/Tend-$arch \
-    $here/Tend.swift $here/Updates.swift
+    $here/Tend.swift $here/Glass.swift $here/Updates.swift
 done
 lipo -create -output $app/Contents/MacOS/Tend $build/arch/Tend-arm64 $build/arch/Tend-x86_64
 

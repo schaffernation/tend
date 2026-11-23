@@ -32,7 +32,7 @@ chmod 755 $app/Contents/Resources/tend
 # Tend.swift has its own @main, so compile a copy without it.
 sed 's/^@main$//' $here/../Tend.swift > $app/../Tend-for-screenshot.swift
 swiftc -parse-as-library -O -o $app/Contents/MacOS/Shot \
-  $app/../Tend-for-screenshot.swift $here/Shot.swift
+  $app/../Tend-for-screenshot.swift $here/../Glass.swift $here/Shot.swift
 $app/Contents/MacOS/Shot $here/../../docs
 # The website shows the same panel at 4x, so it stays sharp on 3x phones and
 # when you zoom in.

@@ -24,6 +24,8 @@ records why Tend works the way it does, and which parts are still untested.
   [site/README.md](site/README.md).
 - `app/Updates.swift` holds the app's Sparkle code: the updater and the
   **Updates** settings.
+- `app/Glass.swift` holds the app's two designs: Liquid Glass, and the
+  design for macOS 14 and 15.
 - `skills/tend` is a Claude Code skill that drives the CLI.
 
 Three rules keep the project in shape:
@@ -91,6 +93,17 @@ against a scratch config and a separate tmux server instead.
 5. When you're done, stop the scratch server with `tmux kill-server`, in the
    same shell.
 
+Two defaults help you check the panel, given as arguments after `--args` so
+they last only for that run. `-TendShowPanelAtLaunch YES` opens the panel a
+second after the app starts, which you need when a full menu bar hides
+Tend's icon. `-TendAppearance Dark` (or `Light`) draws the app in that
+appearance without changing your Mac's:
+
+```
+open -n --env TEND_CONFIG=$TEND_CONFIG --env TMUX_TMPDIR=$TMUX_TMPDIR app/build/Tend.app \
+  --args -TendShowPanelAtLaunch YES -TendAppearance Dark
+```
+
 To test Claude support without starting a real `claude rc`, use a fake
 `claude` script. A real one leaves a disconnected entry in your Claude app,
 and answering its trust prompt changes `~/.claude.json`. tend matches a
@@ -141,6 +154,16 @@ so it never checks for updates.
 SourceKit reports "'main' attribute cannot be used in a module that contains
 top-level code" for `Tend.swift`. It's a false alarm: `build.sh` compiles with
 `-parse-as-library`.
+
+`app/Glass.swift` holds every difference between the Liquid Glass design,
+on macOS 26 and later, and the design for macOS 14 and 15. Views in
+`Tend.swift` use its named styles and contain no `#available` checks. To
+see the macOS 14 and 15 design on a newer Mac, open the app with the
+`TendLegacyDesign` default:
+
+```
+open -n app/build/Tend.app --args -TendLegacyDesign YES
+```
 
 If you change how the panel looks, run `app/screenshot/make.sh` to update the
 screenshots in the README. It draws the real panel with example sessions, so

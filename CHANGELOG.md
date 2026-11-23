@@ -59,6 +59,17 @@ This file lists the changes in each release of Tend. Versions follow
 - The Accounts settings list watched accounts with + and − buttons, as in
   System Settings.
 
+- On macOS 26 and later, the menu bar panel uses Liquid Glass: a glass
+  background, the refresh and plus buttons in one glass group, glass Start
+  and Cancel buttons, and cards with corners that follow the panel's. macOS
+  14 and 15 keep the earlier design.
+
+- The app icon is a layered icon, so macOS 26 and later show it as glass,
+  and in the dark, clear, and tinted icon styles.
+
+- On macOS 26 and later, each Settings pane sizes the window to fit, so
+  General no longer scrolls.
+
 ### Fixed
 
 - Cut, Copy, Paste, Select All, and Undo didn't work in the panel's text
@@ -77,6 +88,9 @@ This file lists the changes in each release of Tend. Versions follow
 - The **Restore sessions after the Mac starts** setting could show the wrong
   value in Settings.
 - An app installed after Tend opened showed no icon until Tend restarted.
+
+- On macOS 27, the panel could show no sessions and stop refreshing,
+  because the app waited forever for a `tend` command that had finished.
 
 ## 0.1
 

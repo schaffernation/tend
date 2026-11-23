@@ -379,6 +379,15 @@ final class Model: ObservableObject {
             let out = Pipe(), err = Pipe()
             p.standardOutput = out
             p.standardError = err
+            // Wait for the exit with terminationHandler, not waitUntilExit:
+            // on macOS 27, waitUntilExit sometimes never returns after tend
+            // exits, and then the panel stops refreshing. The stream keeps
+            // the status if tend exits before anything waits for it.
+            let (exits, exited) = AsyncStream.makeStream(of: Int32.self)
+            p.terminationHandler = { process in
+                exited.yield(process.terminationStatus)
+                exited.finish()
+            }
             do { try p.run() } catch {
                 return TendResult(output: nil, error: "Couldn't run \(Model.tend): \(error.localizedDescription)")
             }
@@ -387,8 +396,9 @@ final class Model: ObservableObject {
             let errReader = Task.detached { err.fileHandleForReading.readDataToEndOfFile() }
             let data = out.fileHandleForReading.readDataToEndOfFile()
             let errData = await errReader.value
-            p.waitUntilExit()
-            guard p.terminationStatus == 0 else {
+            var status: Int32 = -1
+            for await s in exits { status = s }
+            guard status == 0 else {
                 let message = String(decoding: errData, as: UTF8.self)
                 return TendResult(output: nil, error: message.trimmingCharacters(in: .whitespacesAndNewlines))
             }
@@ -737,7 +747,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusPanel: StatusPanelController?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // For testing, without changing the Mac's appearance:
+        // open -n Tend.app --args -TendAppearance Dark (or Light)
+        if let name = UserDefaults.standard.string(forKey: "TendAppearance") {
+            NSApp.appearance = NSAppearance(named: name == "Dark" ? .darkAqua : .aqua)
+        }
         statusPanel = StatusPanelController(model: model)
+        // For testing, on a Mac whose full menu bar hides the item:
+        // open -n Tend.app --args -TendShowPanelAtLaunch YES
+        if UserDefaults.standard.bool(forKey: "TendShowPanelAtLaunch") {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in self?.statusPanel?.show() }
+        }
     }
 }
 
@@ -982,15 +1002,14 @@ final class StatusPanelController: NSObject, NSWindowDelegate, NSDraggingDestina
     }
 }
 
-/// The menu bar panel's window: borderless, with the menu material and
-/// rounded corners, above other windows and full-screen apps, and on every
-/// Space. It takes the keyboard without making Tend the active app, the way
+/// The menu bar panel's window: borderless, with a rounded background
+/// (`PanelBackground`: glass, or the menu material), above other windows and
+/// full-screen apps, and on every Space. It takes the keyboard without making Tend the active app, the way
 /// a menu does, so the app you were in keeps its menu bar.
 final class TendPanel: NSPanel {
     var onCancel: (() -> Void)?
     var onCommandDelete: (() -> Void)?
-    private var host: NSView?
-    private let background = NSVisualEffectView()
+    private let background = PanelBackground.make()
 
     init() {
         super.init(contentRect: NSRect(x: 0, y: 0, width: 400, height: 300),
@@ -999,24 +1018,16 @@ final class TendPanel: NSPanel {
         collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient, .ignoresCycle]
         isOpaque = false
         backgroundColor = .clear
-        hasShadow = true
+        hasShadow = PanelBackground.windowShadow
         hidesOnDeactivate = false
         isReleasedWhenClosed = false
         animationBehavior = .utilityWindow
-        background.material = .menu
-        background.blendingMode = .behindWindow
-        background.state = .active
-        background.maskImage = TendPanel.roundedMask(radius: 12)
         contentView = background
         setAccessibilityLabel("Tend")
     }
 
     func setContent(_ view: NSView) {
-        host?.removeFromSuperview()
-        view.frame = background.bounds
-        view.autoresizingMask = [.width, .height]
-        background.addSubview(view)
-        host = view
+        PanelBackground.setContent(view, in: background)
     }
 
     override var canBecomeKey: Bool { true }
@@ -1040,18 +1051,6 @@ final class TendPanel: NSPanel {
             return true
         }
         return NSApp.mainMenu?.performKeyEquivalent(with: event) ?? false
-    }
-
-    static func roundedMask(radius: CGFloat) -> NSImage {
-        let edge = radius * 2 + 1
-        let image = NSImage(size: NSSize(width: edge, height: edge), flipped: false) { rect in
-            NSColor.black.setFill()
-            NSBezierPath(roundedRect: rect, xRadius: radius, yRadius: radius).fill()
-            return true
-        }
-        image.capInsets = NSEdgeInsets(top: radius, left: radius, bottom: radius, right: radius)
-        image.resizingMode = .stretch
-        return image
     }
 }
 
@@ -1080,7 +1079,7 @@ struct ContentView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: Design.sectionSpacing) {
             header
             messages
 
@@ -1102,16 +1101,10 @@ struct ContentView: View {
             Divider()
             footer
         }
-        .padding(12)
+        .padding(Design.panelPadding)
         .frame(width: 400)
-        .overlay {
-            if dropTargeted {
-                RoundedRectangle(cornerRadius: 10)
-                    .strokeBorder(Color.accentColor, lineWidth: 3)
-                    .padding(2)
-                    .allowsHitTesting(false)
-            }
-        }
+        .panelShape()
+        .dropHighlight(dropTargeted)
         // Drop a folder anywhere on the panel to start a session there.
         .dropDestination(for: URL.self) { urls, _ in
             model.newSession(in: urls)
@@ -1127,7 +1120,7 @@ struct ContentView: View {
     /// focusable list: the arrow keys move the selection, and the keys below
     /// act on the selected session.
     var sessionList: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: Design.sectionSpacing) {
             if !model.tracked.isEmpty {
                 VStack(alignment: .leading, spacing: 2) {
                     SectionHeader("Sessions") {
@@ -1213,25 +1206,25 @@ struct ContentView: View {
             Text("Tend").font(.headline)
             Spacer()
             if model.busy { ProgressView().controlSize(.small) }
-            Button {
-                withAnimation(.easeInOut(duration: 0.6)) { spins += 1 }
-                model.act(["ls"])
-            } label: {
-                Image(systemName: "arrow.clockwise").rotationEffect(.degrees(spins * 360))
+            HeaderButtons {
+                Button {
+                    withAnimation(.easeInOut(duration: 0.6)) { spins += 1 }
+                    model.act(["ls"])
+                } label: {
+                    Image(systemName: "arrow.clockwise").rotationEffect(.degrees(spins * 360))
+                }
+                .accessibilityLabel("Refresh")
+                .keyboardShortcut("r")
+                .help("Check every session now, and save the latest session ID of apps that can resume, like Claude. Tend also does this every 5 seconds.")
+                Button { model.draft == nil ? model.newDraft() : (model.draft = nil) } label: {
+                    Image(systemName: model.draft == nil ? "plus" : "xmark")
+                }
+                .accessibilityLabel(model.draft == nil ? "New Session" : "Cancel New Session")
+                .keyboardShortcut("n")
+                .help(model.draft == nil
+                      ? "Start a new session: pick an app and a folder."
+                      : "Cancel the new session.")
             }
-            .buttonStyle(.borderless)
-            .accessibilityLabel("Refresh")
-            .keyboardShortcut("r")
-            .help("Check every session now, and save the latest session ID of apps that can resume, like Claude. Tend also does this every 5 seconds.")
-            Button { model.draft == nil ? model.newDraft() : (model.draft = nil) } label: {
-                Image(systemName: model.draft == nil ? "plus" : "xmark")
-            }
-            .buttonStyle(.borderless)
-            .accessibilityLabel(model.draft == nil ? "New Session" : "Cancel New Session")
-            .keyboardShortcut("n")
-            .help(model.draft == nil
-                  ? "Start a new session: pick an app and a folder."
-                  : "Cancel the new session.")
         }
     }
 
@@ -1313,8 +1306,7 @@ struct Banner: View {
                     .help("Close this message.")
             }
         }
-        .padding(8)
-        .background(tint.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
+        .surface(.banner(tint))
         .help(help)
     }
 }
@@ -1366,8 +1358,7 @@ struct DroppedBanner: View {
                 .padding(.leading, 24)
             }
         }
-        .padding(8)
-        .background(Color.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
+        .surface(.banner(.orange))
     }
 
     func ago(_ t: Int) -> String {
@@ -1644,15 +1635,16 @@ struct NewSessionForm: View {
                 HStack(spacing: 8) {
                     Spacer()
                     Button("Cancel") { model.draft = nil }
+                        .secondaryActionStyle()
                         .keyboardShortcut(.cancelAction)
                     Button("Start") { model.create() }
+                        .primaryActionStyle()
                         .keyboardShortcut(.defaultAction)
                         .disabled(draft.dir.isEmpty || draft.command.trimmingCharacters(in: .whitespaces).isEmpty
                                   || (setupField != nil && draft.setupText.trimmingCharacters(in: .whitespaces).isEmpty))
                 }
             }
-            .padding(10)
-            .background(Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 8))
+            .surface(.card)
         }
     }
 
@@ -1887,7 +1879,7 @@ struct SessionRow: View {
         }
         .padding(.horizontal, 6)
         .padding(.vertical, 4)
-        .background(RoundedRectangle(cornerRadius: 6)
+        .background(RoundedRectangle(cornerRadius: Design.rowCornerRadius)
             .fill(hovering && !selected ? Color.primary.opacity(0.06) : Color.clear))
         .contentShape(Rectangle())
         .onHover { hovering = $0 }
@@ -1925,7 +1917,7 @@ struct SessionRow: View {
         .padding(.vertical, 4)
         .background {
             if selected {
-                RoundedRectangle(cornerRadius: 6).fill(Color(nsColor: listFocused && !renaming
+                RoundedRectangle(cornerRadius: Design.rowCornerRadius).fill(Color(nsColor: listFocused && !renaming
                     ? .selectedContentBackgroundColor : .unemphasizedSelectedContentBackgroundColor))
             }
         }
@@ -2140,9 +2132,8 @@ struct SessionRow: View {
                 }
             }
         }
-        .padding(8)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: 6))
+        .surface(.question)
     }
 
     /// The last lines the session's pane shows, from `tend peek`. It
@@ -2172,9 +2163,8 @@ struct SessionRow: View {
                 ProgressView().controlSize(.small)
             }
         }
-        .padding(8)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 6))
+        .surface(.peek)
     }
 
     func sendReply() {
@@ -2285,13 +2275,17 @@ struct SettingsView: View {
                     .padding([.horizontal, .top], 12)
             }
             TabView {
-                GeneralPane().tabItem { Label("General", systemImage: "gearshape") }
-                AppsPane().tabItem { Label("Apps", systemImage: "square.grid.2x2") }
-                TerminalPane().tabItem { Label("Terminal", systemImage: "terminal") }
-                AccountsPane().tabItem { Label("Accounts", systemImage: "person.2") }
+                GeneralPane().settingsPane(height: 560)
+                    .tabItem { Label("General", systemImage: "gearshape") }
+                AppsPane().settingsPane(height: 340)
+                    .tabItem { Label("Apps", systemImage: "square.grid.2x2") }
+                TerminalPane().settingsPane(height: 300)
+                    .tabItem { Label("Terminal", systemImage: "terminal") }
+                AccountsPane().settingsPane(height: 330)
+                    .tabItem { Label("Accounts", systemImage: "person.2") }
             }
         }
-        .frame(width: 500, height: 380)
+        .settingsWindowFrame()
     }
 }
 
