@@ -253,6 +253,12 @@ final class Model: ObservableObject {
     @Published var peek: Peek?
     /// Goes up each time the panel opens, so the panel can focus its list.
     @Published var panelOpens = 0
+    /// Goes up each time something asks for the new-session form, so the
+    /// panel can scroll it into view.
+    @Published var formShown = 0
+    /// The tallest the panel can be, so it stops above the bottom of the
+    /// screen. Set by the status item's controller.
+    @Published var panelMaxHeight: CGFloat = .infinity
     /// Closes the menu bar panel. Set by the status item's controller.
     var closePanel: (() -> Void)?
 
@@ -547,6 +553,7 @@ final class Model: ObservableObject {
         guard let folder = Model.folders(in: urls).first else { return false }
         if draft == nil { newDraft() }
         draft?.dir = folder.path
+        formShown += 1
         return true
     }
 
@@ -715,6 +722,7 @@ final class Model: ObservableObject {
                 ?? FileManager.default.homeDirectoryForCurrentUser.path,
             command: app?.launch ?? "",
             showOptions: app == nil)
+        formShown += 1
         Task { await loadFolders() }
     }
 }
@@ -822,6 +830,13 @@ final class StatusPanelController: NSObject, NSWindowDelegate, NSDraggingDestina
             .publisher(for: NSWorkspace.activeSpaceDidChangeNotification)
             .sink { [weak self] _ in self?.close() }
             .store(in: &observers)
+        // A display added, removed, or rearranged, or the Dock moved, changes
+        // how tall the panel can be.
+        NotificationCenter.default
+            .publisher(for: NSApplication.didChangeScreenParametersNotification)
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in self?.fitToContent() }
+            .store(in: &observers)
     }
 
     // The icon: a terminal, filled while an app is busy, with a badge for a
@@ -916,10 +931,12 @@ final class StatusPanelController: NSObject, NSWindowDelegate, NSDraggingDestina
     }
 
     /// Size the panel to its content, and hang it under the menu bar item.
+    /// It stops 8 points above the bottom of the screen's visible frame, as
+    /// a menu does, and tells the content how tall it can be, so the middle
+    /// scrolls instead.
     private func fitToContent() {
         guard let button = statusItem.button, let buttonWindow = button.window else { return }
         let size = host.preferredContentSize
-        guard size.width > 0, size.height > 0 else { return }
         var item = buttonWindow.convertToScreen(button.convert(button.bounds, to: nil))
         let hidden = buttonWindow.frame.height == 0 || item.maxY <= 0
         // A hidden item has no screen of its own: use the one with the menu bar.
@@ -930,11 +947,15 @@ final class StatusPanelController: NSObject, NSWindowDelegate, NSDraggingDestina
             // right end of the menu bar, where menu bar items are.
             item = NSRect(x: visible.maxX - size.width, y: visible.maxY, width: 0, height: 0)
         }
+        let top = item.minY - 4
+        let maxHeight = max(100, top - visible.minY - 8)
+        if abs(model.panelMaxHeight - maxHeight) > 0.5 { model.panelMaxHeight = maxHeight }
+        guard size.width > 0, size.height > 0 else { return }
         var x = item.minX
         x = min(x, visible.maxX - size.width - 6)
         x = max(x, visible.minX + 6)
-        let top = item.minY - 4
-        panel.setFrame(NSRect(x: x, y: top - size.height, width: size.width, height: size.height), display: true)
+        let height = min(size.height, maxHeight)
+        panel.setFrame(NSRect(x: x, y: top - height, width: size.width, height: height), display: true)
     }
 
     /// Run a modal window, like the folder picker, over the panel. The panel
@@ -1078,12 +1099,63 @@ struct ContentView: View {
         return "Start \(which): \(names). Sessions that can resume, like Claude, reattach to their last conversation."
     }
 
+    /// What the panel scrolls to, by `ScrollViewReader`.
+    enum ScrollTarget: Hashable {
+        case top, form
+        case row(String)
+    }
+
     var body: some View {
+        ScrollViewReader { proxy in
+            // The header and footer stay put; the middle scrolls when the
+            // panel would run off the screen (see PanelLayout).
+            PanelLayout(maxHeight: model.panelMaxHeight) {
+                header
+            } content: {
+                middle
+            } footer: {
+                VStack(alignment: .leading, spacing: Design.sectionSpacing) {
+                    Divider()
+                    footer
+                }
+            }
+            // Keep the selected row in view as the arrow keys move it.
+            .onChange(of: model.selection) { _, name in
+                if let name { proxy.scrollTo(ScrollTarget.row(name)) }
+            }
+            // Show a row's recent output when it opens, and again once it loads.
+            .onChange(of: model.peek.map { "\($0.name) \($0.lines != nil)" }) { _, _ in
+                if let name = model.peek?.name { proxy.scrollTo(ScrollTarget.row(name)) }
+            }
+            // Command-N, the + button, or a folder dropped on the icon.
+            .onChange(of: model.formShown) { _, _ in
+                // Wait for the form to be laid out.
+                DispatchQueue.main.async { proxy.scrollTo(ScrollTarget.form, anchor: .top) }
+            }
+            // Each visit to the panel starts at the top, as a menu does.
+            .onChange(of: model.panelOpens) { _, _ in proxy.scrollTo(ScrollTarget.top, anchor: .top) }
+        }
+        .frame(width: 400)
+        .panelShape()
+        .dropHighlight(dropTargeted)
+        // Drop a folder anywhere on the panel to start a session there.
+        .dropDestination(for: URL.self) { urls, _ in
+            model.newSession(in: urls)
+        } isTargeted: { dropTargeted = $0 }
+        .onExitCommand { if !model.escape() { model.closePanel?() } }
+        .onChange(of: model.panelOpens) { _, _ in listFocused = true }
+        // After a rename, the list takes the keyboard back.
+        .onChange(of: model.renaming) { _, name in if name == nil { listFocused = true } }
+        .onAppear { listFocused = true }
+    }
+
+    /// Everything between the header and the footer: messages, the
+    /// new-session form, the sessions, and other accounts.
+    var middle: some View {
         VStack(alignment: .leading, spacing: Design.sectionSpacing) {
-            header
             messages
 
-            if model.draft != nil { NewSessionForm() }
+            if model.draft != nil { NewSessionForm().id(ScrollTarget.form) }
 
             if model.sessions.isEmpty && model.draft == nil && model.refreshError == nil {
                 emptyState
@@ -1097,23 +1169,9 @@ struct ContentView: View {
                     ForEach(watched) { AccountRow(account: $0) }
                 }
             }
-
-            Divider()
-            footer
         }
-        .padding(Design.panelPadding)
-        .frame(width: 400)
-        .panelShape()
-        .dropHighlight(dropTargeted)
-        // Drop a folder anywhere on the panel to start a session there.
-        .dropDestination(for: URL.self) { urls, _ in
-            model.newSession(in: urls)
-        } isTargeted: { dropTargeted = $0 }
-        .onExitCommand { if !model.escape() { model.closePanel?() } }
-        .onChange(of: model.panelOpens) { _, _ in listFocused = true }
-        // After a rename, the list takes the keyboard back.
-        .onChange(of: model.renaming) { _, name in if name == nil { listFocused = true } }
-        .onAppear { listFocused = true }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .id(ScrollTarget.top)
     }
 
     /// The tracked sessions, then the tmux sessions tend doesn't track. One
@@ -1162,6 +1220,7 @@ struct ContentView: View {
             model.selection = session.name
             listFocused = true
         }
+        .id(ScrollTarget.row(session.name))
     }
 
     /// The session list's keys. Rename, the reply field, and the form's
