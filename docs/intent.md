@@ -306,6 +306,37 @@ deliberate, and lives in `sync()`: `status()` itself only reads, so `wait`,
   to the panel, as in a menu: closing the panel clears it, and so does Esc
   once there's nothing else to back out of. Before, a row stayed selected
   after you clicked away, with no way to clear it.
+- **The panel stops above the bottom of the screen, and its middle
+  scrolls.** Before, the panel was as tall as its content, so with many
+  sessions, or the form and question cards open, it ran off the screen and
+  the last rows couldn't be reached. Now, like a long menu or Control
+  Center, it stops 8 points above the bottom of the visible frame of its
+  screen. `fitToContent()` works out that height on every fit and when the
+  screens change, and hands it to the view as `Model.panelMaxHeight`. The
+  header (Tend, refresh, +) and the footer (Settings…, Quit Tend) are
+  pinned; the banners, form, sessions, and other accounts scroll between
+  them. The panel still hugs its content: `PanelLayout` in `Glass.swift`
+  measures the middle's natural height inside the scroll view, where it
+  doesn't depend on the panel's size, so there's no feedback loop, and
+  frames the scroll view at the smaller of that and what's left of the
+  maximum. So `preferredContentSize` still drives the panel, and when
+  everything fits, the panel is the same size and draws the same pixels as
+  before (compared at 2x in both designs and appearances; at 1x, pixel
+  rounding inside the scroll view puts some rows' status text a pixel
+  lower), with no scroll bars or bounce. The arrow keys keep the selected row in view
+  (`ScrollViewReader`, one id per row), and Space, a question card, and
+  the form (Command-N, +, or a folder dropped on the icon) scroll into
+  view; each visit starts at the top, as a menu does. On macOS 26 and
+  later, while the middle scrolls, the header and footer move into
+  `safeAreaBar`s, so the content scrolls under them with the system's soft
+  scroll edge effect. While it fits, they sit outside the bars, because a
+  non-empty bar darkens the panel under it even with nothing scrolled
+  there, and `scrollEdgeEffectHidden` didn't remove that on macOS 27.2.
+  `safeAreaInset` draws no edge effect, so rows showed through the footer.
+  The scroll view itself never moves, so the list keeps its focus when the
+  content starts or stops fitting. On macOS 14 and 15, the middle scrolls
+  between the header and footer, clipped, with a hairline under the header
+  while it doesn't fit, to match the divider over the footer.
 - **Command-C copies the attach command.** Copying a session most often
   means "let me attach to it in a terminal I already have", so Command-C
   puts `tend ls --json`'s `attach` field (`tmux attach -t =NAME`, or your
@@ -508,7 +539,15 @@ Untested, in rough order of risk:
    row dragged out), hover, a click on a row, and closing on a click in
    another app. Synthetic mouse events posted to one process don't reach
    its windows, and posting them system-wide would have clicked the
-   user's own windows.
+   user's own windows. On November 23, 2026, the same way, with 41 sessions
+   and a fake `claude` question: the panel stopping 8 points above the
+   Dock, the arrow keys scrolling down to the last row and its question
+   card, Space scrolling the peek area into view and Esc closing it, the
+   form scrolling into view and Esc returning the panel to its fitting
+   size with the list still focused, in both designs, light and dark. Not
+   seen: scrolling with a trackpad or mouse wheel (synthetic wheel events
+   don't reach a SwiftUI scroll view), a screen change while the panel is
+   open, and a drop onto the panel while it scrolls.
 5. **Open in terminal** (iTerm through AppleScript) from inside a tend
    session fails with "Not authorized to send Apple events to iTerm
    (-1743)". When a launch agent starts the tmux server (see

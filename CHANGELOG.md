@@ -91,6 +91,10 @@ This file lists the changes in each release of Tend. Versions follow
 
 - On macOS 27, the panel could show no sessions and stop refreshing,
   because the app waited forever for a `tend` command that had finished.
+- With many sessions, the panel ran off the bottom of the screen, and you
+  couldn't reach the last rows. Now it stops above the bottom of the screen
+  and its list scrolls, with the header and footer in place, and the arrow
+  keys scroll the selected session into view.
 
 ## 0.1
 

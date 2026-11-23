@@ -131,6 +131,97 @@ extension View {
     }
 }
 
+// MARK: - The panel's layout
+
+/// The panel's header and footer, pinned, with the content between them.
+/// When the panel would run past the bottom of the screen, it stops at
+/// `maxHeight` and the content scrolls, as a long menu or Control Center
+/// does. When everything fits, the panel hugs its content and nothing
+/// scrolls or bounces.
+///
+/// The view reports its height as the smaller of its content's and
+/// `maxHeight`, so the hosting controller's `preferredContentSize` still
+/// sizes the panel. The content's height is measured inside the scroll view,
+/// where it doesn't depend on the scroll view's height, so measuring can't
+/// feed back into the size.
+///
+/// Glass: while the content scrolls, the header and footer move into safe
+/// area bars, the content scrolls under them, and the system's soft scroll
+/// edge effect fades it there, as under a macOS 26 toolbar. While it fits,
+/// they sit above and below the scroll view, exactly as before scrolling
+/// existed. Before: the content scrolls between them,
+/// clipped, with a hairline under the header while it doesn't fit, to match
+/// the divider over the footer.
+struct PanelLayout<Header: View, Content: View, Footer: View>: View {
+    /// The tallest the panel can be.
+    let maxHeight: CGFloat
+    @ViewBuilder let header: Header
+    @ViewBuilder let content: Content
+    @ViewBuilder let footer: Footer
+
+    @State private var headerHeight: CGFloat = 0
+    @State private var contentHeight: CGFloat = 0
+    @State private var footerHeight: CGFloat = 0
+
+    private var naturalHeight: CGFloat { headerHeight + contentHeight + footerHeight }
+    private var height: CGFloat { min(naturalHeight, maxHeight) }
+    /// Whether the content doesn't fit, so it scrolls. Half a point of slack
+    /// keeps rounding from showing scroll bars on content that fits.
+    private var overflows: Bool { naturalHeight > maxHeight + 0.5 }
+
+    var body: some View {
+        if #available(macOS 26, *), Design.glass {
+            // One scroll view in every state, so the list keeps its focus
+            // and its rows their state when the content starts or stops
+            // fitting. The bars are empty while it fits: a bar with
+            // anything in it darkens the panel under it, even with nothing
+            // scrolled there, and the effect can't be hidden.
+            VStack(spacing: 0) {
+                if !overflows { headerBar }
+                scroller
+                    .scrollEdgeEffectStyle(.soft, for: .vertical)
+                    .safeAreaBar(edge: .top, spacing: 0) { if overflows { headerBar } }
+                    .safeAreaBar(edge: .bottom, spacing: 0) { if overflows { footerBar } }
+                    .frame(height: overflows ? height : max(0, height - headerHeight - footerHeight))
+                if !overflows { footerBar }
+            }
+        } else {
+            VStack(spacing: 0) {
+                headerBar
+                scroller
+                    .frame(height: max(0, height - headerHeight - footerHeight))
+                    .overlay(alignment: .top) { if overflows { Divider() } }
+                footerBar
+            }
+        }
+    }
+
+    /// The content, with the space between it and the header and footer
+    /// inside the scroll view, so a selected row's highlight isn't clipped.
+    private var scroller: some View {
+        ScrollView(.vertical) {
+            content
+                .padding(.horizontal, Design.panelPadding)
+                .padding(.vertical, Design.sectionSpacing)
+                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { contentHeight = $0 }
+        }
+        .scrollBounceBehavior(.basedOnSize)
+        .scrollIndicators(overflows ? .automatic : .hidden)
+    }
+
+    private var headerBar: some View {
+        header
+            .padding([.top, .horizontal], Design.panelPadding)
+            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { headerHeight = $0 }
+    }
+
+    private var footerBar: some View {
+        footer
+            .padding([.bottom, .horizontal], Design.panelPadding)
+            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { footerHeight = $0 }
+    }
+}
+
 // MARK: - Surfaces
 
 /// A plain area inside the panel: content, so a fill, not glass. Glass:
