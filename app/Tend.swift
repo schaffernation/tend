@@ -7,6 +7,7 @@
 // Build and install with app/build.sh. The build copies bin/tend into the
 // app's Resources folder, and the app runs that copy.
 
+import Combine
 import ServiceManagement
 import SwiftUI
 import UserNotifications
@@ -184,7 +185,16 @@ struct Session: Decodable, Identifiable, Hashable {
     let state: SessionState
     let attached: Bool
     let app: AppInfo?
+    /// The command that attaches a terminal to the session, or nil if tmux
+    /// isn't installed.
+    let attach: String?
     var id: String { name }
+}
+
+/// The last lines a session's pane shows, from `tend peek --json`.
+struct PeekOutput: Decodable, Hashable {
+    let name: String
+    let lines: [String]
 }
 
 /// What a run of `tend` printed, and whether it worked.
@@ -230,6 +240,32 @@ final class Model: ObservableObject {
     /// The new-session form. Kept here, not in the view, so it survives the
     /// panel closing while a folder picker is open.
     @Published var draft: Draft?
+
+    /// The selected session's name. The arrow keys move it, and Return,
+    /// Space, Delete, and Command-C act on it.
+    @Published var selection: String?
+    /// The session whose row asks you to confirm an action.
+    @Published var confirming: Confirming?
+    /// The session whose name the row is editing.
+    @Published var renaming: String?
+    /// The session whose recent output shows under its row, and that output
+    /// once it's loaded.
+    @Published var peek: Peek?
+    /// Goes up each time the panel opens, so the panel can focus its list.
+    @Published var panelOpens = 0
+    /// Closes the menu bar panel. Set by the status item's controller.
+    var closePanel: (() -> Void)?
+
+    struct Confirming: Equatable {
+        enum Kind { case restart, fresh, untrack }
+        let name: String
+        let kind: Kind
+    }
+
+    struct Peek: Equatable {
+        let name: String
+        var lines: [String]?
+    }
 
     struct Draft {
         var appID: String?  // nil means a custom command
@@ -380,6 +416,141 @@ final class Model: ObservableObject {
         } catch {
             refreshError = "Couldn't read tend's output: \(error.localizedDescription)"
         }
+        // Forget what refers to sessions that are gone.
+        let names = Set(sessions.map(\.name))
+        if let s = selection, !names.contains(s) { selection = nil }
+        if let r = renaming, !names.contains(r) { renaming = nil }
+        if let c = confirming, !names.contains(c.name) { confirming = nil }
+        if let p = peek {
+            if names.contains(p.name) { await loadPeek() } else { peek = nil }
+        }
+    }
+
+    /// Sessions in the order the panel lists them: tracked, then untracked.
+    var listed: [Session] { tracked + untracked }
+    var selected: Session? { sessions.first { $0.name == selection } }
+
+    /// Move the selection up or down the list. With nothing selected, Down
+    /// selects the first row and Up the last, as in a menu.
+    func moveSelection(by delta: Int) {
+        let names = listed.map(\.name)
+        guard !names.isEmpty else { return }
+        if let s = selection, let i = names.firstIndex(of: s) {
+            selection = names[max(0, min(names.count - 1, i + delta))]
+        } else {
+            selection = delta > 0 ? names.first : names.last
+        }
+    }
+
+    /// Delete and Command-Delete: ask, in the row, to stop tracking the
+    /// selected session, the way Restart asks.
+    func confirmUntrack() {
+        guard let s = selected else { return }
+        if s.managed {
+            confirming = .init(name: s.name, kind: .untrack)
+        } else {
+            NSSound.beep()
+        }
+    }
+
+    /// A row's main action: start a stopped session, or open a running one.
+    func primaryAction(_ session: Session) {
+        act(session.state == .stopped ? ["start", session.name] : ["open", session.name])
+    }
+
+    /// Show or hide a session's recent output under its row.
+    func togglePeek(_ name: String) {
+        if peek?.name == name {
+            peek = nil
+            return
+        }
+        peek = Peek(name: name, lines: nil)
+        Task { await loadPeek() }
+    }
+
+    func loadPeek() async {
+        guard let name = peek?.name else { return }
+        let result = await call(["peek", name, "--lines", "20", "--json"])
+        guard peek?.name == name else { return }
+        if let data = result.output, let out = try? decodeTend(PeekOutput.self, from: data) {
+            peek?.lines = out.lines
+        } else {
+            peek?.lines = [result.error ?? "Couldn't read \(name)'s output."]
+        }
+    }
+
+    /// Rename a session with `tend rename`, and keep it selected.
+    func rename(_ old: String, to new: String) {
+        renaming = nil
+        let new = new.trimmingCharacters(in: .whitespaces)
+        guard !new.isEmpty, new != old else { return }
+        Task {
+            busy = true
+            error = nil
+            if await run(["rename", old, new]) != nil, selection == old {
+                // tend replaces . and : the way tmux needs.
+                selection = new.replacingOccurrences(of: ".", with: "-").replacingOccurrences(of: ":", with: "-")
+            }
+            await refresh()
+            busy = false
+        }
+    }
+
+    /// Put text on the clipboard.
+    static func copy(_ text: String) {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
+    }
+
+    /// What dragging a row out provides: the folder as a file, for Finder or
+    /// a terminal's Dock icon, and the attach command as text, for a
+    /// terminal window or a note.
+    static func dragItem(for session: Session) -> NSItemProvider {
+        let provider = NSItemProvider(object: URL(fileURLWithPath: session.dir) as NSURL)
+        if let attach = session.attach { provider.registerObject(attach as NSString, visibility: .all) }
+        provider.suggestedName = session.name
+        return provider
+    }
+
+    /// The folders among dropped file URLs. Packages, like apps, don't count.
+    static func folders(in urls: [URL]) -> [URL] {
+        urls.filter { url in
+            let values = try? url.resourceValues(forKeys: [.isDirectoryKey, .isPackageKey])
+            return url.isFileURL && values?.isDirectory == true && values?.isPackage != true
+        }
+    }
+
+    /// Start a new session in a folder dropped on the menu bar icon or the
+    /// panel: open the form, or point an open form at the folder.
+    @discardableResult
+    func newSession(in urls: [URL]) -> Bool {
+        guard let folder = Model.folders(in: urls).first else { return false }
+        if draft == nil { newDraft() }
+        draft?.dir = folder.path
+        return true
+    }
+
+    /// Handle Esc: back out of the innermost thing in progress. Returns
+    /// false when there's nothing left, and the panel should close.
+    func escape() -> Bool {
+        if renaming != nil { renaming = nil; return true }
+        if confirming != nil { confirming = nil; return true }
+        if peek != nil { peek = nil; return true }
+        if draft != nil { draft = nil; return true }
+        return false
+    }
+
+    /// Choose a folder for the new session with the standard open panel.
+    func chooseFolder() {
+        let panel = NSOpenPanel()
+        panel.title = "Choose a folder for the new session"
+        panel.prompt = "Choose"
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.canCreateDirectories = true
+        panel.directoryURL = URL(fileURLWithPath: draft?.dir ?? NSHomeDirectory())
+        let response = StatusPanelController.runModal { panel.runModal() }
+        if response == .OK, let url = panel.url { draft?.dir = url.path }
     }
 
     /// Read what changes only when you change it: the apps, recipes,
@@ -536,26 +707,337 @@ func shortPath(_ path: String) -> String {
 
 @main
 struct TendApp: App {
-    @StateObject private var model = Model()
+    @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
 
     var body: some Scene {
-        MenuBarExtra {
-            ContentView().environmentObject(model)
-        } label: {
-            Image(systemName: model.anyBusy ? "terminal.fill" : "terminal")
-            if model.anyQuestion {
-                Image(systemName: "questionmark.bubble")
-            }
-            if !model.accountProblems.isEmpty {
-                Image(systemName: "person.crop.circle.badge.exclamationmark")
-            }
-            if model.runningCount > 0 { Text("\(model.runningCount)") }
-        }
-        .menuBarExtraStyle(.window)
-
+        // The menu bar item and its panel are AppKit (see StatusPanelController).
+        // SwiftUI still builds the main menu, with its standard Edit menu, so
+        // Cut, Copy, Paste, Select All, and Undo work in every text field.
         Settings {
-            SettingsView().environmentObject(model)
+            SettingsView().environmentObject(delegate.model)
         }
+    }
+}
+
+@MainActor
+final class AppDelegate: NSObject, NSApplicationDelegate {
+    let model = Model()
+    private var statusPanel: StatusPanelController?
+
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        statusPanel = StatusPanelController(model: model)
+    }
+}
+
+// MARK: - Menu bar item
+
+/// The menu bar item and the panel it opens. `MenuBarExtra` can't take
+/// drops on its icon, highlight it while the panel is open, or keep the panel
+/// open while a folder picker runs, so this small controller does it with
+/// `NSStatusItem` and an `NSPanel`. The panel's contents are SwiftUI.
+@MainActor
+final class StatusPanelController: NSObject, NSWindowDelegate, NSDraggingDestination {
+    private static weak var current: StatusPanelController?
+
+    private let model: Model
+    private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+    private let panel: TendPanel
+    private var monitors: [Any] = []
+    private var observers: [AnyCancellable] = []
+    /// While a modal window, like the folder picker, is open, the panel stays.
+    private var modalDepth = 0
+    private let host: NSHostingController<AnyView>
+    private var sizeObservation: NSKeyValueObservation?
+
+    init(model: Model) {
+        self.model = model
+        panel = TendPanel()
+        host = NSHostingController(rootView: AnyView(ContentView().environmentObject(model)))
+        super.init()
+        StatusPanelController.current = self
+
+        host.sizingOptions = .preferredContentSize
+        panel.setContent(host.view)
+        // Grow and shrink with the content, keeping the top under the menu bar.
+        sizeObservation = host.observe(\.preferredContentSize) { [weak self] _, _ in
+            DispatchQueue.main.async { self?.fitToContent() }
+        }
+        panel.delegate = self
+        panel.onCancel = { [weak self] in self?.escape() }
+        panel.onCommandDelete = { [weak model] in model?.confirmUntrack() }
+        model.closePanel = { [weak self] in self?.close() }
+
+        if let button = statusItem.button {
+            button.target = self
+            button.action = #selector(togglePanel(_:))
+            button.sendAction(on: [.leftMouseUp, .rightMouseUp])
+            button.imagePosition = .imageLeading
+            button.setAccessibilityLabel("Tend")
+            // The button's own window takes drags for it: AppKit hands a drag
+            // over a window to its delegate when no view under it takes it.
+            if let window = button.window, window.delegate == nil {
+                window.registerForDraggedTypes([.fileURL])
+                window.delegate = self
+            }
+        }
+        updateButton()
+        // Redraw the icon after each change, once the change has happened.
+        model.objectWillChange
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in self?.updateButton() }
+            .store(in: &observers)
+        NSWorkspace.shared.notificationCenter
+            .publisher(for: NSWorkspace.activeSpaceDidChangeNotification)
+            .sink { [weak self] _ in self?.close() }
+            .store(in: &observers)
+    }
+
+    // The icon: a terminal, filled while an app is busy, with a badge for a
+    // question and one for an account problem, then the running count.
+    private func updateButton() {
+        guard let button = statusItem.button else { return }
+        var symbols = [model.anyBusy ? "terminal.fill" : "terminal"]
+        if model.anyQuestion { symbols.append("questionmark.bubble") }
+        if !model.accountProblems.isEmpty { symbols.append("person.crop.circle.badge.exclamationmark") }
+        let key = symbols.joined(separator: " ")
+        if button.identifier?.rawValue != key {
+            button.image = StatusPanelController.icon(symbols)
+            button.identifier = NSUserInterfaceItemIdentifier(key)
+        }
+        let count = model.runningCount
+        let title = count > 0 ? "\(count)" : ""
+        if button.title != title { button.title = title }
+        var parts = ["\(count) running"]
+        if model.waitingCount > 0 { parts.append("\(model.waitingCount) waiting for you") }
+        if !model.accountProblems.isEmpty { parts.append("an account needs attention") }
+        button.setAccessibilityValue(parts.joined(separator: ", "))
+    }
+
+    /// SF Symbols side by side, as one template image, so the menu bar tints
+    /// it for light, dark, and the highlighted state.
+    static func icon(_ names: [String]) -> NSImage {
+        let config = NSImage.SymbolConfiguration(pointSize: NSFont.menuBarFont(ofSize: 0).pointSize, weight: .regular)
+        let images = names.compactMap {
+            NSImage(systemSymbolName: $0, accessibilityDescription: nil)?.withSymbolConfiguration(config)
+        }
+        let spacing: CGFloat = 3
+        let width = images.reduce(0) { $0 + $1.size.width } + spacing * CGFloat(max(0, images.count - 1))
+        let height = images.map(\.size.height).max() ?? 16
+        let image = NSImage(size: NSSize(width: width, height: height), flipped: false) { _ in
+            var x: CGFloat = 0
+            for i in images {
+                i.draw(in: NSRect(x: x, y: (height - i.size.height) / 2, width: i.size.width, height: i.size.height))
+                x += i.size.width + spacing
+            }
+            return true
+        }
+        image.isTemplate = true
+        return image
+    }
+
+    // MARK: Showing and closing
+
+    @objc private func togglePanel(_ sender: Any?) {
+        panel.isVisible ? close() : show()
+    }
+
+    func show() {
+        guard !panel.isVisible else { return }
+        fitToContent()
+        panel.makeKeyAndOrderFront(nil)
+        model.panelOpens += 1
+        // The button unhighlights itself when the click ends, so highlight
+        // it after that.
+        DispatchQueue.main.async { [weak self] in
+            guard let self, panel.isVisible else { return }
+            statusItem.button?.highlight(true)
+        }
+        // A click in another app closes the panel. Clicks in this app's
+        // other windows, like Settings, take the key window, which closes it too.
+        let mask: NSEvent.EventTypeMask = [.leftMouseDown, .rightMouseDown, .otherMouseDown]
+        if let m = NSEvent.addGlobalMonitorForEvents(matching: mask, handler: { [weak self] _ in
+            MainActor.assumeIsolated { self?.closeUnlessModal() }
+        }) {
+            monitors.append(m)
+        }
+    }
+
+    func close() {
+        guard panel.isVisible else { return }
+        panel.orderOut(nil)
+        statusItem.button?.highlight(false)
+        monitors.forEach(NSEvent.removeMonitor)
+        monitors.removeAll()
+        model.renaming = nil
+        model.confirming = nil
+    }
+
+    private func closeUnlessModal() {
+        guard modalDepth == 0, NSApp.modalWindow == nil, panel.attachedSheet == nil else { return }
+        close()
+    }
+
+    private func escape() {
+        if !model.escape() { close() }
+    }
+
+    /// Size the panel to its content, and hang it under the menu bar item.
+    private func fitToContent() {
+        guard let button = statusItem.button, let buttonWindow = button.window else { return }
+        let size = host.preferredContentSize
+        guard size.width > 0, size.height > 0 else { return }
+        var item = buttonWindow.convertToScreen(button.convert(button.bounds, to: nil))
+        let hidden = buttonWindow.frame.height == 0 || item.maxY <= 0
+        // A hidden item has no screen of its own: use the one with the menu bar.
+        let screen = hidden ? NSScreen.screens.first : buttonWindow.screen ?? NSScreen.main
+        let visible = screen?.visibleFrame ?? .zero
+        if hidden {
+            // The menu bar hides the item, as when it's full: open at the
+            // right end of the menu bar, where menu bar items are.
+            item = NSRect(x: visible.maxX - size.width, y: visible.maxY, width: 0, height: 0)
+        }
+        var x = item.minX
+        x = min(x, visible.maxX - size.width - 6)
+        x = max(x, visible.minX + 6)
+        let top = item.minY - 4
+        panel.setFrame(NSRect(x: x, y: top - size.height, width: size.width, height: size.height), display: true)
+    }
+
+    /// Run a modal window, like the folder picker, over the panel. The panel
+    /// stays open, below it, and takes the keyboard back afterward.
+    static func runModal<T>(_ body: () -> T) -> T {
+        guard let c = current, c.panel.isVisible else {
+            NSApp.activate(ignoringOtherApps: true)
+            return body()
+        }
+        c.modalDepth += 1
+        let level = c.panel.level
+        c.panel.level = .normal
+        NSApp.activate(ignoringOtherApps: true)
+        defer {
+            c.modalDepth -= 1
+            c.panel.level = level
+            c.panel.makeKeyAndOrderFront(nil)
+        }
+        return body()
+    }
+
+    // MARK: NSWindowDelegate
+
+    func windowDidResignKey(_ notification: Notification) {
+        guard notification.object as? NSWindow === panel else { return }
+        // Wait a moment: a modal window that's about to open, or a sheet,
+        // takes the key window first.
+        DispatchQueue.main.async { [weak self] in
+            guard let self, !panel.isKeyWindow else { return }
+            closeUnlessModal()
+        }
+    }
+
+    // MARK: Drops on the menu bar icon
+
+    private func folders(in info: NSDraggingInfo) -> [URL] {
+        let urls = info.draggingPasteboard.readObjects(
+            forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL] ?? []
+        return Model.folders(in: urls)
+    }
+
+    func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
+        guard !folders(in: sender).isEmpty else { return [] }
+        statusItem.button?.highlight(true)
+        return .generic
+    }
+
+    func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
+        folders(in: sender).isEmpty ? [] : .generic
+    }
+
+    func draggingExited(_ sender: NSDraggingInfo?) {
+        statusItem.button?.highlight(panel.isVisible)
+    }
+
+    func prepareForDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        !folders(in: sender).isEmpty
+    }
+
+    func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        guard model.newSession(in: folders(in: sender)) else { return false }
+        show()
+        statusItem.button?.highlight(true)
+        return true
+    }
+}
+
+/// The menu bar panel's window: borderless, with the menu material and
+/// rounded corners, above other windows and full-screen apps, and on every
+/// Space. It takes the keyboard without making Tend the active app, the way
+/// a menu does, so the app you were in keeps its menu bar.
+final class TendPanel: NSPanel {
+    var onCancel: (() -> Void)?
+    var onCommandDelete: (() -> Void)?
+    private var host: NSView?
+    private let background = NSVisualEffectView()
+
+    init() {
+        super.init(contentRect: NSRect(x: 0, y: 0, width: 400, height: 300),
+                   styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: true)
+        level = .statusBar
+        collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient, .ignoresCycle]
+        isOpaque = false
+        backgroundColor = .clear
+        hasShadow = true
+        hidesOnDeactivate = false
+        isReleasedWhenClosed = false
+        animationBehavior = .utilityWindow
+        background.material = .menu
+        background.blendingMode = .behindWindow
+        background.state = .active
+        background.maskImage = TendPanel.roundedMask(radius: 12)
+        contentView = background
+        setAccessibilityLabel("Tend")
+    }
+
+    func setContent(_ view: NSView) {
+        host?.removeFromSuperview()
+        view.frame = background.bounds
+        view.autoresizingMask = [.width, .height]
+        background.addSubview(view)
+        host = view
+    }
+
+    override var canBecomeKey: Bool { true }
+    override var canBecomeMain: Bool { false }
+
+    /// Esc, when no view inside uses it.
+    override func cancelOperation(_ sender: Any?) {
+        onCancel?()
+    }
+
+    /// The panel takes the keyboard without making Tend the active app, and
+    /// then the main menu may not see key equivalents like Command-C. Pass
+    /// them to it after the panel's own views have had their turn.
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        if super.performKeyEquivalent(with: event) { return true }
+        // Command-Delete stops tracking the selected session, unless you're
+        // typing, where it deletes to the start of the line.
+        if event.keyCode == 51, event.modifierFlags.intersection(.deviceIndependentFlagsMask) == .command,
+           !(firstResponder is NSText), let onCommandDelete {
+            onCommandDelete()
+            return true
+        }
+        return NSApp.mainMenu?.performKeyEquivalent(with: event) ?? false
+    }
+
+    static func roundedMask(radius: CGFloat) -> NSImage {
+        let edge = radius * 2 + 1
+        let image = NSImage(size: NSSize(width: edge, height: edge), flipped: false) { rect in
+            NSColor.black.setFill()
+            NSBezierPath(roundedRect: rect, xRadius: radius, yRadius: radius).fill()
+            return true
+        }
+        image.capInsets = NSEdgeInsets(top: radius, left: radius, bottom: radius, right: radius)
+        image.resizingMode = .stretch
+        return image
     }
 }
 
@@ -567,6 +1049,12 @@ struct ContentView: View {
     @EnvironmentObject var model: Model
     @Environment(\.openSettings) private var openSettings
     @State private var spins = 0.0
+    /// Whether the session list has the keyboard. The selection is drawn in
+    /// the accent color while it does, and in gray while it doesn't, like a
+    /// source list.
+    @FocusState private var listFocused: Bool
+    /// Whether a folder is being dragged over the panel.
+    @State private var dropTargeted = false
 
     /// The Restore button's tooltip, which names the sessions it starts.
     var restoreHelp: String {
@@ -588,27 +1076,7 @@ struct ContentView: View {
                 emptyState
             }
 
-            if !model.tracked.isEmpty {
-                VStack(alignment: .leading, spacing: 2) {
-                    SectionHeader("Sessions") {
-                        if !model.restorable.isEmpty {
-                            Button("Restore \(model.restorable.count)") { model.act(["restore"]) }
-                                .help(restoreHelp)
-                        }
-                    }
-                    ForEach(model.tracked) { SessionRow(session: $0) }
-                }
-            }
-
-            if !model.untracked.isEmpty {
-                VStack(alignment: .leading, spacing: 2) {
-                    SectionHeader("Not tracked") {
-                        Button("Track all") { model.act(["snapshot"]) }
-                            .help("Add every untracked tmux session to the list, so Tend restores it.")
-                    }
-                    ForEach(model.untracked) { SessionRow(session: $0) }
-                }
-            }
+            if !model.sessions.isEmpty { sessionList }
 
             if let watched = model.accounts?.watched, !watched.isEmpty {
                 VStack(alignment: .leading, spacing: 2) {
@@ -622,7 +1090,109 @@ struct ContentView: View {
         }
         .padding(12)
         .frame(width: 400)
+        .overlay {
+            if dropTargeted {
+                RoundedRectangle(cornerRadius: 10)
+                    .strokeBorder(Color.accentColor, lineWidth: 3)
+                    .padding(2)
+                    .allowsHitTesting(false)
+            }
+        }
+        // Drop a folder anywhere on the panel to start a session there.
+        .dropDestination(for: URL.self) { urls, _ in
+            model.newSession(in: urls)
+        } isTargeted: { dropTargeted = $0 }
+        .onExitCommand { if !model.escape() { model.closePanel?() } }
+        .onChange(of: model.panelOpens) { _, _ in listFocused = true }
+        // After a rename, the list takes the keyboard back.
+        .onChange(of: model.renaming) { _, name in if name == nil { listFocused = true } }
+        .onAppear { listFocused = true }
     }
+
+    /// The tracked sessions, then the tmux sessions tend doesn't track. One
+    /// focusable list: the arrow keys move the selection, and the keys below
+    /// act on the selected session.
+    var sessionList: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            if !model.tracked.isEmpty {
+                VStack(alignment: .leading, spacing: 2) {
+                    SectionHeader("Sessions") {
+                        if !model.restorable.isEmpty {
+                            Button("Restore \(model.restorable.count)") { model.act(["restore"]) }
+                                .help(restoreHelp)
+                        }
+                    }
+                    ForEach(model.tracked) { row($0) }
+                }
+            }
+            if !model.untracked.isEmpty {
+                VStack(alignment: .leading, spacing: 2) {
+                    SectionHeader("Not tracked") {
+                        Button("Track all") { model.act(["snapshot"]) }
+                            .help("Add every untracked tmux session to the list, so Tend restores it.")
+                    }
+                    ForEach(model.untracked) { row($0) }
+                }
+            }
+        }
+        .focusable()
+        .focused($listFocused)
+        .focusEffectDisabled()
+        .onKeyPress(phases: .down, action: handleKey)
+        .onDeleteCommand(perform: confirmUntrack)
+        // Command-C copies the selected session's attach command, ready to
+        // paste in a terminal. Copy Path is in the row's context menu.
+        .onCopyCommand {
+            guard let attach = model.selected?.attach else { return [] }
+            return [NSItemProvider(object: attach as NSString)]
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Sessions")
+    }
+
+    func row(_ session: Session) -> some View {
+        SessionRow(session: session, listFocused: listFocused) {
+            model.selection = session.name
+            listFocused = true
+        }
+    }
+
+    /// The session list's keys. Rename, the reply field, and the form's
+    /// fields have the keyboard while you type in them, so these don't
+    /// interfere.
+    func handleKey(_ press: KeyPress) -> KeyPress.Result {
+        // Keys typed in a text field inside the list, like the rename field,
+        // reach this handler too. Leave them to the field.
+        if model.renaming != nil || NSApp.keyWindow?.firstResponder is NSText { return .ignored }
+        let selected = model.selected
+        let command = press.modifiers.contains(.command)
+        switch press.key {
+        case .upArrow: model.moveSelection(by: -1)
+        case .downArrow: model.moveSelection(by: 1)
+        case .return:
+            guard let s = selected else { return .ignored }
+            model.primaryAction(s)
+        case .space:
+            guard let s = selected, s.state != .stopped else { return .ignored }
+            model.togglePeek(s.name)
+        case .delete, .deleteForward:
+            guard selected != nil else { return .ignored }
+            confirmUntrack()
+        case .escape:
+            if !model.escape() { model.closePanel?() }
+        default:
+            // Option-Command-C copies the folder's path, as in Finder.
+            if press.characters.lowercased() == "c", command, press.modifiers.contains(.option),
+               let s = selected {
+                Model.copy(s.dir)
+                return .handled
+            }
+            return .ignored
+        }
+        return .handled
+    }
+
+    func confirmUntrack() { model.confirmUntrack() }
 
     var header: some View {
         HStack(spacing: 8) {
@@ -636,12 +1206,14 @@ struct ContentView: View {
                 Image(systemName: "arrow.clockwise").rotationEffect(.degrees(spins * 360))
             }
             .buttonStyle(.borderless)
+            .accessibilityLabel("Refresh")
             .keyboardShortcut("r")
             .help("Check every session now, and save the latest session ID of apps that can resume, like Claude. Tend also does this every 5 seconds.")
             Button { model.draft == nil ? model.newDraft() : (model.draft = nil) } label: {
                 Image(systemName: model.draft == nil ? "plus" : "xmark")
             }
             .buttonStyle(.borderless)
+            .accessibilityLabel(model.draft == nil ? "New Session" : "Cancel New Session")
             .keyboardShortcut("n")
             .help(model.draft == nil
                   ? "Start a new session: pick an app and a folder."
@@ -723,6 +1295,7 @@ struct Banner: View {
                 Button(action: onClose) { Image(systemName: "xmark") }
                     .buttonStyle(.borderless)
                     .foregroundStyle(.secondary)
+                    .accessibilityLabel("Close Message")
                     .help("Close this message.")
             }
         }
@@ -747,6 +1320,7 @@ struct DroppedBanner: View {
                      ? "A chat lost its connection when its session restarted."
                      : "\(chats.count) chats lost their connection when their sessions restarted.")
                     .font(.callout)
+                    .textSelection(.enabled)
                     .fixedSize(horizontal: false, vertical: true)
                     .frame(maxWidth: .infinity, alignment: .leading)
                 if chats.count > 1 {
@@ -772,6 +1346,7 @@ struct DroppedBanner: View {
                     Button { model.act(["dismiss", chat.session, chat.id]) } label: { Image(systemName: "xmark") }
                         .buttonStyle(.borderless)
                         .foregroundStyle(.secondary)
+                        .accessibilityLabel("Dismiss \(chat.label ?? chat.id)")
                         .help("Take this chat off the list. Its conversation stays on this Mac.")
                 }
                 .padding(.leading, 24)
@@ -822,9 +1397,9 @@ struct ConversationIcon: View {
     var body: some View {
         Group {
             if off {
-                SlashedSymbol(name: "bubble.left", strokeScale: 1 / 0.9)
+                SlashedSymbol(name: "bubble.left", label: "Doesn't restore conversation", strokeScale: 1 / 0.9)
             } else {
-                Image(systemName: "bubble.left")
+                Image(systemName: "bubble.left").accessibilityLabel("Restores conversation")
             }
         }
         .fontWeight(.medium)
@@ -840,6 +1415,8 @@ struct ConversationIcon: View {
 /// into the bottom-right corner.
 struct SlashedSymbol: View {
     let name: String
+    /// What VoiceOver reads, like "Doesn't restore conversation".
+    let label: String
     /// Multiplies the slash's stroke width, to match a symbol drawn heavier.
     var strokeScale: CGFloat = 1
 
@@ -882,7 +1459,8 @@ struct SlashedSymbol: View {
                     s.line.stroke(style: StrokeStyle(lineWidth: s.stroke, lineCap: .round))
                 }
             }
-            .accessibilityLabel("\(name), off")
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(label)
     }
 }
 
@@ -953,24 +1531,16 @@ struct NewSessionForm: View {
 
                     HStack(alignment: .firstTextBaseline, spacing: 8) {
                         label("Folder")
-                        HStack {
-                            Text(shortPath(draft.dir)).lineLimit(1).truncationMode(.head)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .help(draft.dir)
-                            Menu("Choose") {
-                                let s = suggestions
-                                Section("Recent") {
-                                    ForEach(s.recent, id: \.self) { d in Button(shortPath(d)) { model.draft?.dir = d } }
-                                }
-                                Section("Nearby") {
-                                    ForEach(s.nearby, id: \.self) { d in Button(shortPath(d)) { model.draft?.dir = d } }
-                                }
-                                Divider()
-                                Button("Other folder…", action: chooseFolder)
-                            }
+                        let s = suggestions
+                        FolderPicker(
+                            url: Binding { URL(fileURLWithPath: model.draft?.dir ?? draft.dir) }
+                                set: { model.draft?.dir = $0.path },
+                            recent: s.recent.map { URL(fileURLWithPath: $0) },
+                            nearby: s.nearby.map { URL(fileURLWithPath: $0) },
+                            choose: model.chooseFolder)
                             .fixedSize()
-                            .help("Recent folders, the folders next to them, or any folder")
-                        }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .help("\(shortPath(draft.dir)). Click for recent folders, the folders next to them, or any folder. You can also drop a folder here.")
                     }
 
                     if draft.showOptions {
@@ -1038,6 +1608,7 @@ struct NewSessionForm: View {
                     .help("Name, command, setup, and what to restore")
                     Spacer()
                     Button("Cancel") { model.draft = nil }
+                        .keyboardShortcut(.cancelAction)
                     Button("Start") { model.create() }
                         .keyboardShortcut(.defaultAction)
                         .disabled(draft.dir.isEmpty || draft.command.trimmingCharacters(in: .whitespaces).isEmpty
@@ -1064,33 +1635,149 @@ struct NewSessionForm: View {
         let label = r.input ?? "Input"
         return (label, label, "Fills in {input} in: \(r.setup)")
     }
+}
 
-    func chooseFolder() {
-        let panel = NSOpenPanel()
-        panel.title = "Choose a folder for the new session"
-        panel.canChooseFiles = false
-        panel.canChooseDirectories = true
-        panel.canCreateDirectories = true
-        panel.directoryURL = URL(fileURLWithPath: model.draft?.dir ?? NSHomeDirectory())
-        NSApp.activate(ignoringOtherApps: true)
-        if panel.runModal() == .OK, let url = panel.url { model.draft?.dir = url.path }
+/// A folder chooser: a pop-up `NSPathControl` that shows the folder with its
+/// icon. Its menu lists the folder's parents, the recent and nearby folders
+/// tend suggests, and Choose…, which opens the standard open panel. You can
+/// also drop a folder on it.
+struct FolderPicker: NSViewRepresentable {
+    @Binding var url: URL
+    var recent: [URL] = []
+    var nearby: [URL] = []
+    /// Runs the open panel for Choose….
+    var choose: () -> Void
+
+    /// NSPathControl tells VoiceOver it's static text with a URL. In pop-up
+    /// style it's a pop-up button, so say that, and let VoiceOver open it.
+    final class PopUpPathControl: NSPathControl {
+        override func accessibilityRole() -> NSAccessibility.Role? { .popUpButton }
+        override func accessibilityValue() -> Any? { url.map { shortPath($0.path) } }
+        override func accessibilityPerformPress() -> Bool {
+            performClick(nil)
+            return true
+        }
+    }
+
+    func makeNSView(context: Context) -> NSPathControl {
+        let control = PopUpPathControl()
+        control.pathStyle = .popUp
+        control.isEditable = true  // Takes drops.
+        control.allowedTypes = ["public.folder"]
+        control.url = url
+        control.delegate = context.coordinator
+        control.target = context.coordinator
+        control.action = #selector(Coordinator.pathChosen(_:))
+        control.setAccessibilityLabel("Folder")
+        return control
+    }
+
+    func updateNSView(_ control: NSPathControl, context: Context) {
+        context.coordinator.parent = self
+        if control.url != url { control.url = url }
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator(self) }
+
+    @MainActor
+    final class Coordinator: NSObject, NSPathControlDelegate {
+        var parent: FolderPicker
+
+        init(_ parent: FolderPicker) { self.parent = parent }
+
+        /// A parent folder chosen from the menu, or a folder dropped on it.
+        @objc func pathChosen(_ control: NSPathControl) {
+            if let url = control.clickedPathItem?.url ?? control.url { parent.url = url }
+        }
+
+        @objc func folderChosen(_ item: NSMenuItem) {
+            if let url = item.representedObject as? URL { parent.url = url }
+        }
+
+        @objc func chooseOther(_ item: NSMenuItem) {
+            // Let the menu close before the open panel runs.
+            DispatchQueue.main.async { self.parent.choose() }
+        }
+
+        func pathControl(_ pathControl: NSPathControl, willPopUp menu: NSMenu) {
+            menu.removeAllItems()
+            var parents: [URL] = []
+            var u = parent.url.standardizedFileURL
+            while true {
+                parents.append(u)
+                let up = u.deletingLastPathComponent()
+                if up.path == u.path { break }
+                u = up
+            }
+            parents.forEach { menu.addItem(item($0, title: FileManager.default.displayName(atPath: $0.path))) }
+            for (title, urls) in [("Recent", parent.recent), ("Nearby", parent.nearby)] where !urls.isEmpty {
+                menu.addItem(.separator())
+                menu.addItem(.sectionHeader(title: title))
+                urls.forEach { menu.addItem(item($0, title: shortPath($0.path))) }
+            }
+            menu.addItem(.separator())
+            let other = NSMenuItem(title: "Choose…", action: #selector(chooseOther(_:)), keyEquivalent: "")
+            other.target = self
+            menu.addItem(other)
+        }
+
+        private func item(_ url: URL, title: String) -> NSMenuItem {
+            let item = NSMenuItem(title: title, action: #selector(folderChosen(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = url
+            let icon = NSWorkspace.shared.icon(forFile: url.path)
+            icon.size = NSSize(width: 16, height: 16)
+            item.image = icon
+            item.toolTip = url.path
+            return item
+        }
+
+        func pathControl(_ pathControl: NSPathControl, validateDrop info: NSDraggingInfo) -> NSDragOperation {
+            Model.folders(in: urls(info)).isEmpty ? [] : .generic
+        }
+
+        func pathControl(_ pathControl: NSPathControl, acceptDrop info: NSDraggingInfo) -> Bool {
+            guard let folder = Model.folders(in: urls(info)).first else { return false }
+            parent.url = folder
+            return true
+        }
+
+        private func urls(_ info: NSDraggingInfo) -> [URL] {
+            info.draggingPasteboard.readObjects(
+                forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL] ?? []
+        }
     }
 }
 
 /// One session. The leading icon shows the app and, in its badge, the
-/// state. The main action always shows; the others show on hover, or always
-/// if you turn that on in Settings. Restart and Start fresh ask first.
+/// state. The main action always shows; the others show on hover, on the
+/// selected row, or always if you turn that on in Settings. Restart, Start
+/// fresh, and Stop tracking ask first.
 struct SessionRow: View {
     @EnvironmentObject var model: Model
     @AppStorage("alwaysShowRowButtons") private var alwaysShowButtons = false
     @State private var hovering = false
-    @State private var confirming: Confirm?
     @State private var reply = ""
+    @State private var newName = ""
+    @FocusState private var nameFocused: Bool
     let session: Session
-
-    enum Confirm { case restart, fresh }
+    /// Whether the session list has the keyboard, which draws the selection
+    /// in the accent color.
+    var listFocused = false
+    /// Selects the row, when you click it.
+    var select: () -> Void = {}
 
     var question: AppInfo.Question? { session.app?.question }
+    var selected: Bool { model.selection == session.name }
+    /// White text on the accent color, as in a menu or a focused source list.
+    var prominent: Bool { selected && listFocused && !renaming }
+    var confirming: Model.Confirming.Kind? {
+        model.confirming?.name == session.name ? model.confirming?.kind : nil
+    }
+    var renaming: Bool { model.renaming == session.name }
+    var peekLines: [String]?? {
+        model.peek?.name == session.name ? .some(model.peek?.lines) : .none
+    }
 
     /// Orange means the session needs you. Nothing else uses it.
     var badge: Color {
@@ -1105,7 +1792,7 @@ struct SessionRow: View {
     var status: (text: String, color: Color) {
         switch session.state {
         case .running:
-            if let s = session.app?.status { return (s, s == "busy" ? .blue : .secondary) }
+            if let s = session.app?.status { return (s, s == "busy" && !prominent ? .blue : .secondary) }
             return ("running", .secondary)
         case .exited: return ("exited", .secondary)
         default: return ("stopped", .secondary)
@@ -1143,34 +1830,121 @@ struct SessionRow: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 8) {
-                leading
-                VStack(alignment: .leading, spacing: 1) {
-                    HStack(spacing: 4) {
-                        Text(session.name).fontWeight(.medium).lineLimit(1)
-                        settingIcons
-                    }
-                    Text(folder).font(.caption).foregroundStyle(.secondary)
-                        .lineLimit(1).truncationMode(.head)
-                        .help(details)
-                }
-                Spacer(minLength: 8)
-                trailing
-            }
+            mainLine
             if let q = question { questionCard(q) }
+            if let lines = peekLines { peekCard(lines) }
         }
         .padding(.horizontal, 6)
         .padding(.vertical, 4)
         .background(RoundedRectangle(cornerRadius: 6)
-            .fill(hovering ? Color.primary.opacity(0.06) : Color.clear))
+            .fill(hovering && !selected ? Color.primary.opacity(0.06) : Color.clear))
         .contentShape(Rectangle())
         .onHover { hovering = $0 }
         .contextMenu { menu }
-        .task(id: confirming) {
+        .task(id: model.confirming) {
             // A confirmation you don't act on goes away by itself.
-            guard confirming != nil, (try? await Task.sleep(for: .seconds(6))) != nil else { return }
-            confirming = nil
+            guard confirming != nil, (try? await Task.sleep(for: .seconds(6))) != nil,
+                  model.confirming?.name == session.name else { return }
+            model.confirming = nil
         }
+    }
+
+    /// The icon, name, folder, status, and buttons. The selection highlights
+    /// this line, and VoiceOver reads it as one element with actions.
+    var mainLine: some View {
+        HStack(spacing: 8) {
+            leading
+            VStack(alignment: .leading, spacing: 1) {
+                HStack(spacing: 4) {
+                    if renaming {
+                        renameField
+                    } else {
+                        Text(session.name).fontWeight(.medium).lineLimit(1)
+                    }
+                    settingIcons
+                }
+                Text(folder).font(.caption).foregroundStyle(.secondary)
+                    .lineLimit(1).truncationMode(.head)
+                    .help(details)
+            }
+            Spacer(minLength: 8)
+            trailing
+        }
+        .padding(.horizontal, 6)
+        .padding(.vertical, 4)
+        .background {
+            if selected {
+                RoundedRectangle(cornerRadius: 6).fill(Color(nsColor: listFocused && !renaming
+                    ? .selectedContentBackgroundColor : .unemphasizedSelectedContentBackgroundColor))
+            }
+        }
+        .environment(\.backgroundProminence, prominent ? .increased : .standard)
+        .foregroundStyle(prominent ? Color.white : Color.primary)
+        .padding(.horizontal, -6)
+        .padding(.vertical, -4)
+        .contentShape(Rectangle())
+        .onTapGesture(count: 2) { model.primaryAction(session) }
+        .simultaneousGesture(TapGesture().onEnded(select))
+        .onDrag { Model.dragItem(for: session) }
+        // While you rename it, the field is its own element.
+        .accessibilityElement(children: renaming ? .contain : .ignore)
+        .accessibilityLabel(accessibilityText)
+        .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
+        .accessibilityHint(session.state == .stopped ? "Starts the session." : "Opens the session in a terminal window.")
+        .accessibilityAction { model.primaryAction(session) }
+        .accessibilityActions { accessibilityActions }
+    }
+
+    var accessibilityText: String {
+        var parts = [session.name, status.text, "in \(shortPath(session.dir))"]
+        if !session.managed { parts.append("not tracked") }
+        if question != nil { parts.append("waiting for your answer") }
+        if session.managed && !session.autostart { parts.append("doesn't restore at login") }
+        if session.managed && !session.restoreConversation { parts.append("doesn't restore conversation") }
+        return parts.joined(separator: ", ")
+    }
+
+    @ViewBuilder var accessibilityActions: some View {
+        if session.state != .stopped {
+            Button(model.peek?.name == session.name ? "Hide Recent Output" : "Show Recent Output") {
+                model.togglePeek(session.name)
+            }
+            Button("Stop") { model.act(["stop", session.name]) }
+        }
+        if session.managed {
+            if session.state != .stopped { Button("Restart") { model.confirming = .init(name: session.name, kind: .restart) } }
+            Button("Stop Tracking") { model.confirming = .init(name: session.name, kind: .untrack) }
+        } else {
+            Button("Track") { model.act(["snapshot", session.name]) }
+        }
+        Button("Rename") { startRename() }
+        if let attach = session.attach { Button("Copy Attach Command") { Model.copy(attach) } }
+        Button("Copy Path") { Model.copy(session.dir) }
+        Button("Show in Finder") { showInFinder() }
+    }
+
+    var renameField: some View {
+        TextField("Name", text: $newName)
+            .textFieldStyle(.roundedBorder)
+            .controlSize(.small)
+            .labelsHidden()
+            .focused($nameFocused)
+            .onSubmit { model.rename(session.name, to: newName) }
+            .onExitCommand { model.renaming = nil }
+            .onKeyPress(.escape) {
+                model.renaming = nil
+                return .handled
+            }
+            .onAppear {
+                newName = session.name
+                // After the field is in the window, or the list keeps the keyboard.
+                DispatchQueue.main.async { nameFocused = true }
+            }
+            .onChange(of: nameFocused) { _, focused in
+                // Clicking elsewhere keeps the new name, as in Finder.
+                if !focused && model.renaming == session.name { model.rename(session.name, to: newName) }
+            }
+            .help("Press Return to rename \(session.name), or Esc to keep its name.")
     }
 
     var leading: some View {
@@ -1205,24 +1979,26 @@ struct SessionRow: View {
     @ViewBuilder var trailing: some View {
         if let c = confirming {
             HStack(spacing: 6) {
-                Button("Cancel") { confirming = nil }
+                Button("Cancel") { model.confirming = nil }
                     .buttonStyle(.borderless)
                     .controlSize(.small)
-                Button(c == .fresh ? "Start fresh" : "Restart", role: .destructive) {
-                    confirming = nil
-                    model.act(c == .fresh ? ["restart", session.name, "--fresh"] : ["restart", session.name])
+                Button(confirmTitle(c), role: .destructive) {
+                    model.confirming = nil
+                    switch c {
+                    case .fresh: model.act(["restart", session.name, "--fresh"])
+                    case .restart: model.act(["restart", session.name])
+                    case .untrack: model.act(["rm", session.name])
+                    }
                 }
                 .buttonStyle(.borderedProminent)
                 .tint(.red)
                 .controlSize(.small)
-                .help(c == .fresh
-                      ? "Stop \(session.name) and start its command again, without reattaching to its last session."
-                      : restartHelp)
+                .help(confirmHelp(c))
             }
         } else {
             HStack(spacing: 4) {
                 // Hidden, not removed, so the row doesn't shift on hover.
-                let show = hovering || alwaysShowButtons
+                let show = hovering || selected || alwaysShowButtons
                 HStack(spacing: 4) { secondaryButtons }
                     .opacity(show ? 1 : 0)
                     .allowsHitTesting(show)
@@ -1230,6 +2006,22 @@ struct SessionRow: View {
                     .padding(.horizontal, 2)
                 primaryButton
             }
+        }
+    }
+
+    func confirmTitle(_ c: Model.Confirming.Kind) -> String {
+        switch c {
+        case .fresh: "Start fresh"
+        case .restart: "Restart"
+        case .untrack: "Stop tracking"
+        }
+    }
+
+    func confirmHelp(_ c: Model.Confirming.Kind) -> String {
+        switch c {
+        case .fresh: "Stop \(session.name) and start its command again, without reattaching to its last session."
+        case .restart: restartHelp
+        case .untrack: "Take \(session.name) off the list. Its tmux session keeps running, and Tend no longer restores it."
         }
     }
 
@@ -1241,29 +2033,31 @@ struct SessionRow: View {
 
     @ViewBuilder var primaryButton: some View {
         if session.state == .stopped {
-            icon("play.fill", session.resume != nil
+            icon("play.fill", "Start", session.resume != nil
                  ? "Start \(session.name) and reattach to its last session: \(session.resume!)"
                  : "Start \(session.name).") { model.act(["start", session.name]) }
         } else {
-            icon("macwindow", "Open \(session.name) in a new terminal window.") { model.act(["open", session.name]) }
+            icon("macwindow", "Open", "Open \(session.name) in a new terminal window.") { model.act(["open", session.name]) }
         }
     }
 
     @ViewBuilder var secondaryButtons: some View {
         if session.state != .stopped {
             if session.managed {
-                icon("arrow.triangle.2.circlepath", restartHelp + " Tend asks first.") { confirming = .restart }
+                icon("arrow.triangle.2.circlepath", "Restart", restartHelp + " Tend asks first.") {
+                    model.confirming = .init(name: session.name, kind: .restart)
+                }
             } else {
-                icon("plus.circle", "Track \(session.name), so Tend restores it.") { model.act(["snapshot", session.name]) }
+                icon("plus.circle", "Track", "Track \(session.name), so Tend restores it.") { model.act(["snapshot", session.name]) }
             }
-            icon("stop.fill", "Stop \(session.name) by closing its tmux session." + (session.managed ? " It stays on the list." : "")) { model.act(["stop", session.name]) }
+            icon("stop.fill", "Stop", "Stop \(session.name) by closing its tmux session." + (session.managed ? " It stays on the list." : "")) { model.act(["stop", session.name]) }
         }
     }
 
     func questionCard(_ q: AppInfo.Question) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             Label {
-                Text(q.text).fixedSize(horizontal: false, vertical: true)
+                Text(q.text).fixedSize(horizontal: false, vertical: true).textSelection(.enabled)
             } icon: {
                 Image(systemName: "questionmark.bubble").foregroundStyle(.orange)
             }
@@ -1300,23 +2094,74 @@ struct SessionRow: View {
         .background(Color.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: 6))
     }
 
+    /// The last lines the session's pane shows, from `tend peek`. It
+    /// updates with every refresh while it's open.
+    func peekCard(_ lines: [String]?) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                Text("Recent output").font(.caption).fontWeight(.semibold).foregroundStyle(.secondary)
+                Spacer()
+                Button { model.peek = nil } label: { Image(systemName: "xmark") }
+                    .buttonStyle(.borderless)
+                    .foregroundStyle(.secondary)
+                    .controlSize(.small)
+                    .accessibilityLabel("Hide Recent Output")
+                    .help("Hide the recent output. Space does too.")
+            }
+            if let lines {
+                ScrollView(.horizontal) {
+                    Text(lines.isEmpty ? "(no output)" : lines.joined(separator: "\n"))
+                        .font(.system(.caption2, design: .monospaced))
+                        .fixedSize()
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .scrollIndicators(.never)
+            } else {
+                ProgressView().controlSize(.small)
+            }
+        }
+        .padding(8)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 6))
+    }
+
     func sendReply() {
         model.act(["answer", session.name, "--text", reply])
         reply = ""
+    }
+
+    func startRename() {
+        model.selection = session.name
+        model.renaming = session.name
+    }
+
+    func showInFinder() {
+        NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: session.dir)])
     }
 
     @ViewBuilder var menu: some View {
         if session.state == .stopped {
             Button("Start") { model.act(["start", session.name]) }
         } else {
-            Button("Open in terminal") { model.act(["open", session.name]) }
+            Button("Open in Terminal") { model.act(["open", session.name]) }
+            Button(model.peek?.name == session.name ? "Hide Recent Output" : "Show Recent Output") {
+                model.togglePeek(session.name)
+            }
         }
+        Divider()
+        Button("Show in Finder", action: showInFinder)
+        if let attach = session.attach {
+            Button("Copy Attach Command") { Model.copy(attach) }
+        }
+        Button("Copy Path") { Model.copy(session.dir) }
+        Button("Rename…", action: startRename)
         if session.managed {
             Divider()
             if session.state != .stopped {
-                Button("Restart") { confirming = .restart }
+                Button("Restart") { model.confirming = .init(name: session.name, kind: .restart) }
             }
-            Button("Start fresh") { confirming = .fresh }
+            Button("Start fresh") { model.confirming = .init(name: session.name, kind: .fresh) }
             Button(session.autostart ? "Don't restore at login" : "Restore at login") {
                 model.act(["autostart", session.name, session.autostart ? "off" : "on"])
             }
@@ -1331,7 +2176,7 @@ struct SessionRow: View {
         }
         Divider()
         if session.managed {
-            Button("Stop tracking") { model.act(["rm", session.name]) }
+            Button("Stop tracking") { model.confirming = .init(name: session.name, kind: .untrack) }
         } else {
             Button("Track") { model.act(["snapshot", session.name]) }
         }
@@ -1348,9 +2193,11 @@ struct SessionRow: View {
             HStack(spacing: 3) {
                 if !session.autostart {
                     Image(systemName: "autostartstop.slash")
+                        .accessibilityLabel("Doesn't restore at login")
                         .help("Tend doesn't start \(session.name) when it restores sessions. Right-click the row to change that.")
                 } else if show {
                     Image(systemName: "autostartstop").foregroundStyle(.tertiary)
+                        .accessibilityLabel("Restores at login")
                         .help("Tend starts \(session.name) when it restores sessions, like after the Mac restarts.")
                 }
                 if !session.restoreConversation {
@@ -1366,8 +2213,9 @@ struct SessionRow: View {
         }
     }
 
-    func icon(_ name: String, _ help: String, _ action: @escaping () -> Void) -> some View {
-        Button(action: action) { Image(systemName: name) }
+    /// An icon-only button, with a name for VoiceOver and a tooltip.
+    func icon(_ name: String, _ title: String, _ help: String, _ action: @escaping () -> Void) -> some View {
+        Button(action: action) { Label(title, systemImage: name).labelStyle(.iconOnly) }
             .buttonStyle(.borderless)
             .help(help)
     }
@@ -1598,44 +2446,91 @@ struct TerminalPane: View {
 /// because then that account's sessions aren't running.
 struct AccountsPane: View {
     @EnvironmentObject var model: Model
+    @State private var selection: String?
+
+    var watched: [AccountStatus] { model.accounts?.watched ?? [] }
+    var available: [Accounts.Available] { model.accounts?.available ?? [] }
 
     var body: some View {
         Form {
             Section {
-                ForEach(model.accounts?.watched ?? []) { account in
-                    HStack {
-                        Circle().fill(account.ok ? Color.green : Color.orange).frame(width: 8, height: 8)
-                        VStack(alignment: .leading, spacing: 0) {
-                            Text(account.name)
-                            Text(account.ok ? "Tend is running."
-                                 : account.loggedIn ? "Logged in, but Tend isn't running." : "Not logged in.")
-                                .font(.caption).foregroundStyle(.secondary)
-                        }
-                        Spacer()
-                        Button { model.watchAccount(account.user, false) } label: { Image(systemName: "minus.circle") }
-                            .buttonStyle(.borderless)
-                            .help("Stop watching \(account.name)'s account")
-                    }
-                }
-                let available = model.accounts?.available ?? []
-                if available.isEmpty && (model.accounts?.watched.isEmpty ?? true) {
+                if available.isEmpty && watched.isEmpty {
                     Text("This Mac has no other accounts.").foregroundStyle(.secondary)
-                } else if !available.isEmpty {
-                    Menu("Watch an account") {
-                        ForEach(available, id: \.self) { a in
-                            Button(a.name) { model.watchAccount(a.user, true) }
+                } else {
+                    // A list with + and − buttons beneath it, as in System Settings.
+                    VStack(spacing: 0) {
+                        List(selection: $selection) {
+                            ForEach(watched) { account in
+                                HStack {
+                                    Circle().fill(account.ok ? Color.green : Color.orange).frame(width: 8, height: 8)
+                                        .accessibilityHidden(true)
+                                    VStack(alignment: .leading, spacing: 0) {
+                                        Text(account.name)
+                                        Text(account.ok ? "Tend is running."
+                                             : account.loggedIn ? "Logged in, but Tend isn't running." : "Not logged in.")
+                                            .font(.caption).foregroundStyle(.secondary)
+                                    }
+                                }
+                                .accessibilityElement(children: .combine)
+                                .tag(account.user)
+                            }
                         }
+                        .listStyle(.bordered(alternatesRowBackgrounds: true))
+                        .frame(height: 160)
+                        .overlay {
+                            if watched.isEmpty {
+                                Text("No accounts watched").foregroundStyle(.secondary)
+                            }
+                        }
+                        .onDeleteCommand(perform: removeSelected)
+                        addRemoveBar
                     }
-                    .fixedSize()
-                    .help("Warn me when this account isn't logged in or isn't running Tend. Install Tend in that account too, with Open Tend at login on.")
+                    .overlay(Rectangle().strokeBorder(Color(nsColor: .separatorColor)))
                 }
             } header: {
                 Text("Other accounts on this Mac")
             } footer: {
-                Text("Tend warns you when a watched account isn't logged in or isn't running Tend, because then that account's sessions aren't running.")
+                Text("Tend warns you when a watched account isn't logged in or isn't running Tend, because then that account's sessions aren't running. Install Tend in that account too, with Open Tend at login on.")
                     .font(.caption).foregroundStyle(.secondary)
             }
         }
         .formStyle(.grouped)
+    }
+
+    var addRemoveBar: some View {
+        HStack(spacing: 0) {
+            Menu {
+                ForEach(available, id: \.self) { a in
+                    Button(a.name) { model.watchAccount(a.user, true) }
+                }
+            } label: {
+                Image(systemName: "plus")
+            }
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .fixedSize()
+            .frame(width: 28, height: 22)
+            .disabled(available.isEmpty)
+            .accessibilityLabel("Watch an Account")
+            .help(available.isEmpty ? "Every other account on this Mac is already watched."
+                  : "Warn me when an account isn't logged in or isn't running Tend.")
+            Divider().frame(height: 16)
+            Button(action: removeSelected) {
+                Image(systemName: "minus").frame(width: 28, height: 22).contentShape(Rectangle())
+            }
+            .buttonStyle(.borderless)
+            .disabled(selection == nil)
+            .accessibilityLabel("Stop Watching")
+            .help("Stop watching the selected account")
+            Spacer()
+        }
+        .background(Color(nsColor: .controlBackgroundColor))
+        .overlay(alignment: .top) { Divider() }
+    }
+
+    func removeSelected() {
+        guard let user = selection else { return }
+        selection = nil
+        model.watchAccount(user, false)
     }
 }
