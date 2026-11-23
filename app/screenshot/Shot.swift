@@ -18,6 +18,9 @@ struct Shot {
         guard !model.sessions.isEmpty else { fatalError("The model didn't load any sessions from fake-tend.") }
         RunLoop.main.run(until: Date().addingTimeInterval(0.5))
         let out = CommandLine.arguments[1]
+        // Pixels per point: 2 for the README, 4 for the website, which
+        // shows the panel on 3x phones and zoomed-in browsers too.
+        let scale = CommandLine.arguments.count > 2 ? CGFloat(Double(CommandLine.arguments[2]) ?? 2) : 2
         for (name, file) in [(NSAppearance.Name.aqua, "light"), (.darkAqua, "dark")] {
             let panel = ContentView()
                 .environmentObject(model)
@@ -37,9 +40,8 @@ struct Shot {
             window.orderFrontRegardless()
             host.layoutSubtreeIfNeeded()
             RunLoop.main.run(until: Date().addingTimeInterval(1))
-            // Twice the point size, for Retina displays.
             guard let rep = NSBitmapImageRep(
-                bitmapDataPlanes: nil, pixelsWide: Int(host.bounds.width * 2), pixelsHigh: Int(host.bounds.height * 2),
+                bitmapDataPlanes: nil, pixelsWide: Int(host.bounds.width * scale), pixelsHigh: Int(host.bounds.height * scale),
                 bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
                 colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0) else { fatalError("no bitmap") }
             rep.size = host.bounds.size

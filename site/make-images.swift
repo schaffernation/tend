@@ -10,7 +10,8 @@
 //   site/images/icon-192.png       the app icon, for the Web App Manifest
 //   site/images/icon-512.png       the app icon, for the manifest and the page
 //   site/images/og.png             1200 by 630, the card that link previews show
-//   site/images/screenshot-*.png   copies of docs/screenshot-*.png
+//
+// The screenshots in site/images come from app/screenshot/make.sh, at 4x.
 
 import AppKit
 
@@ -149,10 +150,3 @@ try write(wholeIcon(192), "images/icon-192.png")
 try write(wholeIcon(512), "images/icon-512.png")
 try write(card(), "images/og.png")
 
-for scheme in ["light", "dark"] {
-    let name = "screenshot-\(scheme).png"
-    let target = images.appendingPathComponent(name)
-    try? FileManager.default.removeItem(at: target)
-    try FileManager.default.copyItem(at: repo.appendingPathComponent("docs/\(name)"), to: target)
-    print("Wrote site/images/\(name)")
-}

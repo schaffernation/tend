@@ -1,5 +1,6 @@
 #!/bin/zsh
-# Draw the README screenshots, docs/screenshot-light.png and -dark.png.
+# Draw the README screenshots, docs/screenshot-light.png and -dark.png, and
+# the website's, site/images/screenshot-light.png and -dark.png, at 4x.
 #
 # Usage: app/screenshot/make.sh
 #
@@ -33,3 +34,6 @@ sed 's/^@main$//' $here/../Tend.swift > $app/../Tend-for-screenshot.swift
 swiftc -parse-as-library -O -o $app/Contents/MacOS/Shot \
   $app/../Tend-for-screenshot.swift $here/Shot.swift
 $app/Contents/MacOS/Shot $here/../../docs
+# The website shows the same panel at 4x, so it stays sharp on 3x phones and
+# when you zoom in.
+$app/Contents/MacOS/Shot $here/../../site/images 4
