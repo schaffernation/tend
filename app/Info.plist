@@ -41,7 +41,7 @@
        lives: appcast.sh reads it from here too. Change it if the feed
        moves. -->
   <key>SUFeedURL</key>
-  <string>https://schaffernation.com/tend/appcast.xml</string>
+  <string>https://tend.schaffernation.com/appcast.xml</string>
   <!-- The public half of the EdDSA key that signs updates. Until this holds
        a real key, Tend doesn't check for updates. To make the key, once, run
        app/build/cache/Sparkle-VERSION/bin/generate_keys, which stores the

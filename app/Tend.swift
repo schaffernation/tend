@@ -352,9 +352,19 @@ final class Model: ObservableObject {
     var anyQuestion: Bool { waitingCount > 0 }
     var accountProblems: [AccountStatus] { accounts?.watched.filter { !$0.ok } ?? [] }
 
-    var cliInstalled: Bool {
-        (try? FileManager.default.destinationOfSymbolicLink(atPath: Model.cliLink.path)) != nil
-            || FileManager.default.fileExists(atPath: Model.cliLink.path)
+    /// Where `tend` is on your PATH, or nil if it isn't installed: the link
+    /// the Install button makes in ~/.local/bin, or the one a Homebrew cask
+    /// makes, when it points at this app's copy.
+    var cliPath: String? {
+        let fm = FileManager.default
+        if (try? fm.destinationOfSymbolicLink(atPath: Model.cliLink.path)) != nil
+            || fm.fileExists(atPath: Model.cliLink.path) {
+            return Model.cliLink.path
+        }
+        let bundled = URL(fileURLWithPath: Model.tend).resolvingSymlinksInPath().path
+        return ["/opt/homebrew/bin/tend", "/usr/local/bin/tend"].first {
+            fm.fileExists(atPath: $0) && URL(fileURLWithPath: $0).resolvingSymlinksInPath().path == bundled
+        }
     }
 
     /// Run tend. Returns its output, or the error it printed.
@@ -2250,7 +2260,7 @@ struct GeneralPane: View {
     @AppStorage("alwaysShowRowButtons") private var alwaysShowButtons = false
     @AppStorage(Model.restoreOnLaunchKey) private var restoreOnLaunch = true
     @State private var openAtLogin = SMAppService.mainApp.status == .enabled
-    @State private var cliInstalled = false
+    @State private var cliPath: String?
 
     var body: some View {
         Form {
@@ -2276,12 +2286,12 @@ struct GeneralPane: View {
             }
             Section("Command line") {
                 LabeledContent("tend") {
-                    if cliInstalled {
-                        Text(shortPath(Model.cliLink.path)).foregroundStyle(.secondary).textSelection(.enabled)
+                    if let cliPath {
+                        Text(shortPath(cliPath)).foregroundStyle(.secondary).textSelection(.enabled)
                     } else {
                         Button("Install") {
                             model.installCLI()
-                            cliInstalled = model.cliInstalled
+                            cliPath = model.cliPath
                         }
                         .disabled(Model.setupProblem != nil)
                         .help("Link tend into ~/.local/bin, so you can run it in a terminal and over ssh. Add ~/.local/bin to your PATH if it isn't there already.")
@@ -2301,7 +2311,7 @@ struct GeneralPane: View {
             }
         }
         .formStyle(.grouped)
-        .onAppear { cliInstalled = model.cliInstalled }
+        .onAppear { cliPath = model.cliPath }
     }
 }
 

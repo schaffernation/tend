@@ -384,7 +384,7 @@ Before the first release, set up update signing once:
 3. In `app/Info.plist`, replace the `SUPublicEDKey` placeholder with the
    public key, and commit it.
 4. Make sure you can publish files at the `SUFeedURL` in `app/Info.plist`
-   (`https://schaffernation.com/tend/appcast.xml`). To move the feed, change
+   (`https://tend.schaffernation.com/appcast.xml`). To move the feed, change
    that one value, before the first release if you can: released copies
    keep checking the address they shipped with.
 

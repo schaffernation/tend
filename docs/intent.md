@@ -330,9 +330,11 @@ deliberate, and lives in `sync()`: `status()` itself only reads, so `wait`,
   so the repository stays small and an upgrade is a two-line change. Tend
   isn't sandboxed, so the build leaves out Sparkle's XPC services. The
   disk images stay on GitHub Releases; the appcast lives at `SUFeedURL` in
-  `Info.plist` (`https://schaffernation.com/tend/appcast.xml` for now),
-  because installed copies check that address forever, and a feed on our
-  own domain can move hosts without breaking them. A build without a real
+  `Info.plist` (`https://tend.schaffernation.com/appcast.xml`), because
+  installed copies check that address forever. The feed is on Tend's own
+  subdomain, not under a path on schaffernation.com, so it depends only on
+  a DNS record: moving Tend's site to another host, or changing how
+  schaffernation.com routes its pages, can't break it. A build without a real
   `SUPublicEDKey`, like a fork's, doesn't start Sparkle at all. Tend is a menu bar app, so it brings
   Sparkle's windows to the front itself.
 - **Action errors and refresh errors are separate.** An action's error stays
