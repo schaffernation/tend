@@ -31,8 +31,15 @@ chmod 755 $app/Contents/Resources/tend
 
 # Tend.swift has its own @main, so compile a copy without it.
 sed 's/^@main$//' $here/../Tend.swift > $app/../Tend-for-screenshot.swift
+# Tend.swift uses Updates.swift, which links Sparkle, so link it the way
+# build.sh does, and put the framework where the renderer finds it.
+(){ local here=${here:h}; source $here/sparkle.sh; typeset -g sparkle=$sparkle }
+mkdir -p $app/Contents/Frameworks
+ditto $sparkle/Sparkle.framework $app/Contents/Frameworks/Sparkle.framework
 swiftc -parse-as-library -O -o $app/Contents/MacOS/Shot \
-  $app/../Tend-for-screenshot.swift $here/../Glass.swift $here/Shot.swift
+  -F $sparkle -framework Sparkle \
+  -Xlinker -rpath -Xlinker @executable_path/../Frameworks \
+  $app/../Tend-for-screenshot.swift $here/../Glass.swift $here/../Updates.swift $here/Shot.swift
 $app/Contents/MacOS/Shot $here/../../docs
 # The website shows the same panel at 4x, so it stays sharp on 3x phones and
 # when you zoom in.
