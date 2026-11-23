@@ -1564,6 +1564,23 @@ struct NewSessionForm: View {
                         Spacer(minLength: 0)
                     }
 
+                    // The disclosure sits with the fields it reveals, so the
+                    // bottom row holds only Cancel and Start, as in a dialog.
+                    HStack(spacing: 8) {
+                        Color.clear.frame(width: NewSessionForm.labelWidth, height: 0)
+                        Button {
+                            withAnimation(.easeInOut(duration: 0.15)) { model.draft?.showOptions.toggle() }
+                        } label: {
+                            Label("Options", systemImage: "chevron.right")
+                                .labelStyle(DisclosureLabelStyle(expanded: draft.showOptions))
+                        }
+                        .buttonStyle(.borderless)
+                        .foregroundStyle(.secondary)
+                        .accessibilityValue(draft.showOptions ? "Expanded" : "Collapsed")
+                        .help("Name, command, setup, and what to restore")
+                        Spacer(minLength: 0)
+                    }
+
                     if draft.showOptions {
                         HStack(alignment: .firstTextBaseline, spacing: 8) {
                             label("Name")
@@ -1619,14 +1636,12 @@ struct NewSessionForm: View {
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
 
-                HStack {
-                    Button {
-                        model.draft?.showOptions.toggle()
-                    } label: {
-                        Label("Options", systemImage: draft.showOptions ? "chevron.down" : "chevron.right")
-                    }
-                    .buttonStyle(.borderless)
-                    .help("Name, command, setup, and what to restore")
+                Divider()
+                    .padding(.top, 2)
+
+                // Cancel and Start, apart from the fields and at the bottom
+                // right, where a Mac dialog puts its buttons.
+                HStack(spacing: 8) {
                     Spacer()
                     Button("Cancel") { model.draft = nil }
                         .keyboardShortcut(.cancelAction)
@@ -1644,6 +1659,21 @@ struct NewSessionForm: View {
     func label(_ text: String) -> some View {
         Text(text).foregroundStyle(.secondary)
             .frame(width: NewSessionForm.labelWidth, alignment: .trailing)
+    }
+
+    /// A disclosure label: the chevron turns down when the section is open,
+    /// like the disclosure triangles in a Mac dialog.
+    struct DisclosureLabelStyle: LabelStyle {
+        let expanded: Bool
+
+        func makeBody(configuration: Configuration) -> some View {
+            HStack(spacing: 4) {
+                configuration.icon
+                    .font(.caption.weight(.semibold))
+                    .rotationEffect(.degrees(expanded ? 90 : 0))
+                configuration.title
+            }
+        }
     }
 
     /// The text field the chosen setup needs, if any.
