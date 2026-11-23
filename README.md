@@ -10,6 +10,8 @@ shows whether each Claude session is busy or idle, answers Claude's prompts
 from the menu bar, and reconnects a restored session to the same conversation
 instead of starting a new one. You can teach Tend about any other program.
 
+Website: [tend.schaffernation.com](https://tend.schaffernation.com)
+
 Tend has two parts:
 
 - `tend`, a command-line tool. It works over ssh.

@@ -5,7 +5,7 @@ cask "tend" do
   url "https://github.com/schaffernation/tend/releases/download/v#{version}/Tend-#{version}.dmg"
   name "Tend"
   desc "Restores and manages long-running tmux sessions"
-  homepage "https://github.com/schaffernation/tend"
+  homepage "https://tend.schaffernation.com"
 
   livecheck do
     url :url
