@@ -57,7 +57,7 @@ print
 print "Built $dmg and $latest"
 print "To publish them:"
 print "  gh release create v$version $dmg $latest --title 'Tend $version' --generate-notes"
-print "Then update the Homebrew cask, and push the tap:"
-print "  $here/update-cask.sh $version $dmg PATH_TO_HOMEBREW_TEND_CLONE"
+print "Then update the Homebrew cask, and commit and push it:"
+print "  $here/update-cask.sh $version $dmg"
 
 $here/appcast.sh $dmg

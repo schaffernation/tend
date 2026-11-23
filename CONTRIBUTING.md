@@ -155,7 +155,7 @@ text goes in `.help` tooltips.
 ## Release
 
 Maintainers release Tend as a disk image on GitHub Releases, and as a
-Homebrew cask in the `schaffernation/homebrew-tend` tap.
+Homebrew cask in the `schaffernation/homebrew-apps` tap.
 
 1. In `app/Info.plist`, raise `CFBundleShortVersionString` and
    `CFBundleVersion`. In `CHANGELOG.md`, rename **Unreleased** to the new
@@ -166,25 +166,25 @@ Homebrew cask in the `schaffernation/homebrew-tend` tap.
 3. Publish the release with the `gh release create` command that
    `release.sh` prints. The cask downloads `Tend-VERSION.dmg` from the
    `vVERSION` release, so keep that file name.
-4. Update the cask with the uploaded disk image:
+4. Update the cask with the uploaded disk image, then commit and push it:
 
    ```
-   app/update-cask.sh VERSION app/build/Tend-VERSION.dmg ~/src/homebrew-tend
+   app/update-cask.sh VERSION app/build/Tend-VERSION.dmg
+   git commit -am "Homebrew: Tend VERSION" && git push
    ```
 
-   The script sets the version and SHA-256 in
-   `packaging/homebrew/Casks/tend.rb`, copies the cask into your clone of
-   the tap, and commits it there. Commit the change in this repository too.
-5. Check the cask, and then push the tap:
+   The script sets the version and SHA-256 in `packaging/homebrew/tend.rb`.
+   The `schaffernation/homebrew-apps` tap copies the cask from this
+   repository within an hour. To copy it now, run the tap's **Sync casks**
+   workflow on GitHub.
+5. Once the tap has it, check the cask:
 
    ```
-   brew audit --cask --strict --online schaffernation/tend/tend
-   git -C ~/src/homebrew-tend push
+   brew audit --cask --strict --online schaffernation/apps/tend
    ```
 
-To set up the tap the first time, create an empty public repository named
-`schaffernation/homebrew-tend` on GitHub, clone it, and run step 4 with that
-clone. Homebrew finds `schaffernation/tend` at that repository by name.
+The tap lists the casks it copies in its `casks.yaml`. Homebrew finds
+`schaffernation/apps` at `github.com/schaffernation/homebrew-apps` by name.
 
 ## Send a pull request
 

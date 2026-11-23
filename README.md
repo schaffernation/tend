@@ -51,7 +51,7 @@ development server or a script that keeps a connection open.
 ### With Homebrew
 
 ```
-brew install --cask schaffernation/tend/tend
+brew install --cask schaffernation/apps/tend
 ```
 
 Homebrew installs tmux if you don't have it, puts Tend in **Applications**,

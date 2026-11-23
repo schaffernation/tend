@@ -165,8 +165,14 @@ deliberate, and lives in `sync()`: `status()` itself only reads, so `wait`,
   official repository wants a notable project (for a self-submission, three
   times the 30 forks, 30 watchers, or 75 stars it asks of others) at least 30
   days old, so it waits until Tend has that. The cask in
-  `packaging/homebrew/Casks/tend.rb` is the source of truth;
-  `app/update-cask.sh` copies it into `schaffernation/homebrew-tend`. It
+  `packaging/homebrew/tend.rb` is the source of truth, and
+  `app/update-cask.sh` updates it for each release. The tap,
+  `schaffernation/homebrew-apps`, holds every app's cask, and its own
+  workflow copies each one from the app's repository, from a list in the
+  tap. Homebrew only reads casks inside a tap's Git repository, so the tap
+  needs a copy, but the app's repository owns the file. `packaging/` has a
+  folder for each way Tend is distributed, so the release tooling for each
+  one lives with the app. The cask
   depends on the tmux formula but not on Python: Homebrew itself needs the
   Command Line Tools, so `/usr/bin/python3` (3.9 on macOS 14) already works
   wherever the cask installs, and a `python@3.x` formula would pull in a
