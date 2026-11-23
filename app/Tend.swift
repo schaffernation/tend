@@ -547,6 +547,7 @@ final class Model: ObservableObject {
         if confirming != nil { confirming = nil; return true }
         if peek != nil { peek = nil; return true }
         if draft != nil { draft = nil; return true }
+        if selection != nil { selection = nil; return true }
         return false
     }
 
@@ -881,6 +882,8 @@ final class StatusPanelController: NSObject, NSWindowDelegate, NSDraggingDestina
         monitors.removeAll()
         model.renaming = nil
         model.confirming = nil
+        // A selection belongs to one visit to the panel, as in a menu.
+        model.selection = nil
     }
 
     private func closeUnlessModal() {
@@ -1505,10 +1508,15 @@ struct NewSessionForm: View {
 
     var launchable: [AppProfile] { model.apps.filter { $0.enabled && $0.launch != nil } }
 
-    /// Folders you've used, and the folders next to them (your other
-    /// projects), most recently changed first, from `tend folders`.
+    /// The 5 folders you used last, and the 5 most recently changed folders
+    /// next to them (your other projects), from `tend folders`. The menu
+    /// leaves out the chosen folder and repeats nothing. Choose… reaches
+    /// every other folder.
     var suggestions: (recent: [String], nearby: [String]) {
-        (model.folders?.recent ?? [], Array((model.folders?.nearby ?? []).prefix(40)))
+        let current = model.draft?.dir
+        let recent = (model.folders?.recent ?? []).filter { $0 != current }.prefix(5)
+        let nearby = (model.folders?.nearby ?? []).filter { $0 != current && !recent.contains($0) }.prefix(5)
+        return (Array(recent), Array(nearby))
     }
 
     var body: some View {
@@ -1550,8 +1558,10 @@ struct NewSessionForm: View {
                             nearby: s.nearby.map { URL(fileURLWithPath: $0) },
                             choose: model.chooseFolder)
                             .fixedSize()
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .help("\(shortPath(draft.dir)). Click for recent folders, the folders next to them, or any folder. You can also drop a folder here.")
+                            .help("\(shortPath(draft.dir)). Click for recent folders and the folders next to them. You can also drop a folder here.")
+                        Button("Choose…", action: model.chooseFolder)
+                            .help("Choose any folder with the open panel.")
+                        Spacer(minLength: 0)
                     }
 
                     if draft.showOptions {

@@ -153,7 +153,7 @@ The session list works from the keyboard:
 | Option-Command-C | Copy the path of the session's folder |
 | Delete | Stop tracking the session (Tend asks first) |
 | Command-N | Start a new session |
-| Esc | Close the new-session form, and then the panel |
+| Esc | Close the new-session form, clear the selection, and then close the panel |
 
 Right-click a session for more, like Show in Finder, Copy Path, Rename, and
 its restore settings. You can also drag a session to Finder, to a

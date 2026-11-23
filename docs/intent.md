@@ -295,7 +295,10 @@ deliberate, and lives in `sync()`: `status()` itself only reads, so `wait`,
   source list. The selection, the row being renamed, the inline
   confirmation, and the open peek live in the model, so keys, Esc, and the
   context menu all reach them. Rows still keep their order, and a selected
-  row shows its buttons, as a hovered one does.
+  row shows its buttons, as a hovered one does. A selection lasts one visit
+  to the panel, as in a menu: closing the panel clears it, and so does Esc
+  once there's nothing else to back out of. Before, a row stayed selected
+  after you clicked away, with no way to clear it.
 - **Command-C copies the attach command.** Copying a session most often
   means "let me attach to it in a terminal I already have", so Command-C
   puts `tend ls --json`'s `attach` field (`tmux attach -t =NAME`, or your
@@ -312,9 +315,11 @@ deliberate, and lives in `sync()`: `status()` itself only reads, so `wait`,
   `Menu` labeled Choose, because the path control shows the folder with its
   icon, lists its parent folders, takes a dropped folder, and looks like
   every other folder pop-up on the Mac. `FolderPicker` rebuilds its menu in
-  `pathControl(_:willPopUp:)`: the parents, then the Recent and Nearby
-  folders from `tend folders`, then Choose…, which runs the open panel
-  through `runModal`. `NSPathControl` tells VoiceOver it's static text, so
+  `pathControl(_:willPopUp:)`: the parents, then up to 5 Recent and 5
+  Nearby folders from `tend folders`, then Choose…, which runs the open
+  panel through `runModal`. The first version listed every recent folder
+  and 40 nearby ones, which made a menu too long to scan. A Choose… button
+  sits next to the pop-up too, so the open panel is one click away. `NSPathControl` tells VoiceOver it's static text, so
   a small subclass reports it as a pop-up button that VoiceOver can open.
 - **Peek is read-only and CLI-first.** `tend peek` reads the pane with
   `capture-pane` and doesn't call `sync()`. The app shows its output under
